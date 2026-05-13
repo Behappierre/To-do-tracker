@@ -15,6 +15,7 @@ export interface Proposal {
   notes: string | null
   pdf_url: string | null
   pdf_filename: string | null
+  updated_at: string | null
   days_live?: number
 }
 
