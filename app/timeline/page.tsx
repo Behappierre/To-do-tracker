@@ -340,6 +340,15 @@ export default function TimelinePage() {
           </div>
         </div>
       )}
+
+      {selected && (
+        <ProposalDrawer
+          proposal={selected}
+          onClose={() => setSelected(null)}
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+        />
+      )}
     </div>
   )
 }
