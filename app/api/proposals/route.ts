@@ -66,7 +66,8 @@ export async function POST(req: NextRequest) {
       pdf_url = urlData.publicUrl
     }
 
-    const { pdfBase64: _pdf, ...proposalData } = body
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { pdfBase64, ...proposalData } = body
 
     const { data, error } = await supabase
       .from('proposals')
