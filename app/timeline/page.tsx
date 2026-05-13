@@ -6,13 +6,6 @@ import { formatDate } from '@/lib/utils'
 import { addMonths, differenceInDays, parseISO, startOfDay, format, addDays, min } from 'date-fns'
 import { cn } from '@/lib/utils'
 
-const STATUS_COLORS: Record<ProposalStatus, string> = {
-  Open: 'bg-blue-400',
-  'Followed Up': 'bg-yellow-400',
-  Responded: 'bg-green-400',
-  Closed: 'bg-gray-400',
-  Stalled: 'bg-red-400',
-}
 
 const STATUS_BG: Record<ProposalStatus, string> = {
   Open: 'bg-blue-500',

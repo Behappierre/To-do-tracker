@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Search, FileText, TrendingUp, Clock, AlertTriangle, Users } from 'lucide-react'
-import { Proposal, ProposalStatus } from '@/types/proposal'
+import { Proposal } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -36,7 +36,7 @@ export default function DashboardPage() {
       const data = await res.json()
       if (!res.ok) { setFetchError(data.error || 'Failed to load proposals'); setProposals([]); return }
       setProposals(Array.isArray(data) ? data : [])
-    } catch (e) {
+    } catch {
       setFetchError('Network error — is the server running?')
     } finally {
       setLoading(false)

@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       pdf_url = urlData.publicUrl
     }
 
-    const { pdfBase64, ...proposalData } = body
+    const { pdfBase64: _pdf, ...proposalData } = body
 
     const { data, error } = await supabase
       .from('proposals')
