@@ -1,6 +1,12 @@
 # ProposalTracker
 
-AI-powered outbound proposal tracking app. Upload PDF proposals, let Claude extract the details, then track status, days live, and timelines — all in one dashboard.
+Sending proposals is the easy part. Knowing what happened to them is not.
+
+ProposalTracker is an AI-powered pipeline for managing your outbound business development. You upload a PDF — a single proposal or an entire export of sent emails — and Claude reads through every message, extracts the key information, and adds each proposal to a structured database. From that moment on, you have a living record: who you contacted, what you proposed, when you sent it, whether there is a deadline, and exactly how long it has been sitting without a response.
+
+The dashboard gives you an at-a-glance view of your pipeline. Which proposals are still open? Which ones have been followed up? How many are past their deadline? The timeline view maps every proposal onto a Gantt-style chart so you can see at a glance how your outreach effort is distributed over time — which clients have been waiting the longest, where activity has been concentrated, and what is coming up. Clicking any bar or row opens a detail panel where you can update the status, record notes, adjust the deadline, or pull up the original PDF.
+
+The goal is simple: no more lost proposals, no more "when did I send that?", and no more following up too late.
 
 ## Tech Stack
 
@@ -40,12 +46,15 @@ cp .env.local.example .env.local
 
 #### Database
 
-Run the migration SQL in the Supabase SQL Editor (Dashboard → SQL Editor):
+Run the following SQL in the Supabase SQL Editor (Dashboard → SQL Editor):
 
 ```sql
+-- Create the proposals table
 CREATE TABLE IF NOT EXISTS proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   proposal_title text,
   sender_name text,
   recipient_name text,
@@ -60,9 +69,36 @@ CREATE TABLE IF NOT EXISTS proposals (
   pdf_filename text
 );
 
+-- Keep updated_at current on every row update
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER proposals_updated_at
+  BEFORE UPDATE ON proposals
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Enable Row Level Security
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all operations" ON proposals FOR ALL USING (true) WITH CHECK (true);
+
+-- Each user can only see and manage their own proposals
+CREATE POLICY "Users can view own proposals"
+  ON proposals FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own proposals"
+  ON proposals FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own proposals"
+  ON proposals FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own proposals"
+  ON proposals FOR DELETE USING (auth.uid() = user_id);
 ```
+
+> **Existing data?** If you added rows before auth was set up, run:
+> `UPDATE proposals SET user_id = '<your-user-id>' WHERE user_id IS NULL;`
+> Find your user ID in Supabase → Authentication → Users.
 
 #### Storage bucket
 
@@ -89,10 +125,14 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 - Days Live colour coding: green < 14d, amber 14–30d, red > 30d
 
 ### Timeline (`/timeline`)
-- Gantt-style bars from proposal date to deadline
+- Gantt-style bars spanning from the proposal send date to the last action (or today for active proposals)
+- Looks back over the selected window so you see your real history, not the future
+- Orange tick marker on any proposal with a deadline
+- Last-action dot shows when you most recently touched a proposal
 - Zoom: 1 month, 3 months, 6 months, 1 year
 - Group by Company toggle
 - Hover tooltip with recipient, summary, and status
+- Click any bar or label to open the detail drawer
 
 ### Upload Flow
 1. Drag-and-drop or click to pick a PDF
@@ -137,5 +177,6 @@ supabase/
 ## Notes
 
 - `pdf-parse` runs server-side only (listed in `serverComponentsExternalPackages`)
-- No authentication — single-user app with open RLS policy
+- Authentication via Supabase Auth; RLS restricts every user to their own proposals
+- Sign in with email + password, or use a magic link for passwordless access
 - All dates display as `DD MMM YYYY` (e.g. `13 May 2026`)

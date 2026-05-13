@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthClient } from '@/lib/supabase-server'
 import { getServiceClient } from '@/lib/supabase'
 import { computeDaysLive } from '@/lib/utils'
 
@@ -8,13 +9,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase environment variables are not configured. Please create .env.local — see README.md.' }, { status: 500 })
     }
 
-    const supabase = getServiceClient()
+    const supabase = getAuthClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(req.url)
     const company = searchParams.get('company')
     const status = searchParams.get('status')
     const search = searchParams.get('search')
 
-    let query = supabase.from('proposals').select('*').order('created_at', { ascending: false })
+    let query = supabase
+      .from('proposals')
+      .select('*')
+      .order('created_at', { ascending: false })
 
     if (company) query = query.ilike('recipient_company', `%${company}%`)
     if (status && status !== 'All') query = query.eq('status', status)
@@ -45,7 +54,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = getServiceClient()
+    const supabase = getAuthClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
+    const serviceClient = getServiceClient()
     const body = await req.json()
 
     // Upload PDF file if provided as base64
@@ -54,7 +69,7 @@ export async function POST(req: NextRequest) {
       const buffer = Buffer.from(body.pdfBase64, 'base64')
       const filename = `${Date.now()}-${body.pdf_filename}`
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await serviceClient.storage
         .from('proposal-pdfs')
         .upload(filename, buffer, { contentType: 'application/pdf', upsert: false })
 
@@ -62,7 +77,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: uploadError.message }, { status: 500 })
       }
 
-      const { data: urlData } = supabase.storage.from('proposal-pdfs').getPublicUrl(uploadData.path)
+      const { data: urlData } = serviceClient.storage.from('proposal-pdfs').getPublicUrl(uploadData.path)
       pdf_url = urlData.publicUrl
     }
 
@@ -74,6 +89,7 @@ export async function POST(req: NextRequest) {
       .insert({
         ...proposalData,
         pdf_url,
+        user_id: user.id,
       })
       .select()
       .single()
