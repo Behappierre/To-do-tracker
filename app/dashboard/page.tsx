@@ -10,7 +10,7 @@ import { StatusBadge } from '@/components/ui/badge'
 import { UploadModal } from '@/components/proposals/UploadModal'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
 import { formatDate, daysLiveColor, cn } from '@/lib/utils'
-import { differenceInDays, parseISO } from 'date-fns'
+import { differenceInDays, parseISO, compareAsc } from 'date-fns'
 
 const STATUSES = ['All', 'Open', 'Followed Up', 'Responded', 'Closed', 'Stalled']
 
@@ -23,6 +23,8 @@ export default function DashboardPage() {
   const [status, setStatus] = useState('All')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selected, setSelected] = useState<Proposal | null>(null)
+  const [sortKey, setSortKey] = useState<string>('created_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const fetchProposals = useCallback(async () => {
     setLoading(true)
@@ -67,6 +69,41 @@ export default function DashboardPage() {
     setProposals((prev) => prev.filter((p) => p.id !== id))
     setSelected(null)
   }
+
+  function toggleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
+  const sorted = [...proposals].sort((a, b) => {
+    let cmp = 0
+    if (sortKey === 'proposal_title') {
+      cmp = (a.proposal_title ?? '').localeCompare(b.proposal_title ?? '')
+    } else if (sortKey === 'recipient_name') {
+      cmp = (a.recipient_name ?? '').localeCompare(b.recipient_name ?? '')
+    } else if (sortKey === 'recipient_company') {
+      cmp = (a.recipient_company ?? '').localeCompare(b.recipient_company ?? '')
+    } else if (sortKey === 'proposal_date') {
+      cmp = a.proposal_date && b.proposal_date
+        ? compareAsc(parseISO(a.proposal_date), parseISO(b.proposal_date))
+        : (a.proposal_date ? 1 : -1)
+    } else if (sortKey === 'days_live') {
+      cmp = (a.days_live ?? 0) - (b.days_live ?? 0)
+    } else if (sortKey === 'deadline') {
+      cmp = a.deadline && b.deadline
+        ? compareAsc(parseISO(a.deadline), parseISO(b.deadline))
+        : (a.deadline ? 1 : -1)
+    } else if (sortKey === 'status') {
+      cmp = a.status.localeCompare(b.status)
+    } else {
+      cmp = compareAsc(parseISO(a.created_at), parseISO(b.created_at))
+    }
+    return sortDir === 'asc' ? cmp : -cmp
+  })
 
   return (
     <div className="space-y-6">
@@ -150,17 +187,32 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  <th className="px-4 py-3">Title</th>
-                  <th className="px-4 py-3">Recipient</th>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3">Sent</th>
-                  <th className="px-4 py-3">Days Live</th>
-                  <th className="px-4 py-3">Deadline</th>
-                  <th className="px-4 py-3">Status</th>
+                  {([
+                    { key: 'proposal_title', label: 'Title' },
+                    { key: 'recipient_name', label: 'Recipient' },
+                    { key: 'recipient_company', label: 'Company' },
+                    { key: 'proposal_date', label: 'Sent' },
+                    { key: 'days_live', label: 'Days Live' },
+                    { key: 'deadline', label: 'Deadline' },
+                    { key: 'status', label: 'Status' },
+                  ] as { key: string; label: string }[]).map(({ key, label }) => (
+                    <th
+                      key={key}
+                      className="px-4 py-3 cursor-pointer select-none hover:text-gray-800 whitespace-nowrap"
+                      onClick={() => toggleSort(key)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        <span className="text-gray-300">
+                          {sortKey === key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                        </span>
+                      </span>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {proposals.map((p) => {
+                {sorted.map((p) => {
                   const days = p.days_live ?? 0
                   const isOverdue = p.deadline &&
                     ['Open', 'Followed Up', 'Stalled'].includes(p.status) &&
