@@ -1,36 +1,141 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ProposalTracker
 
-## Getting Started
+AI-powered outbound proposal tracking app. Upload PDF proposals, let Claude extract the details, then track status, days live, and timelines — all in one dashboard.
 
-First, run the development server:
+## Tech Stack
+
+- **Next.js 14** (App Router, TypeScript)
+- **Tailwind CSS** — utility-first styling
+- **Supabase** — Postgres database + file storage
+- **Anthropic Claude API** — PDF intelligence extraction (`claude-sonnet-4-20250514`)
+- **pdf-parse** — server-side PDF text extraction
+
+---
+
+## Quick Start
+
+### 1. Clone and install
+
+```bash
+cd proposal-tracker
+npm install
+```
+
+### 2. Set up environment variables
+
+Copy the example file and fill in your values:
+
+```bash
+cp .env.local.example .env.local
+```
+
+| Variable | Where to find it |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Project Settings → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Project Settings → API → anon public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Project Settings → API → service_role key |
+| `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys |
+
+### 3. Set up Supabase
+
+#### Database
+
+Run the migration SQL in the Supabase SQL Editor (Dashboard → SQL Editor):
+
+```sql
+CREATE TABLE IF NOT EXISTS proposals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz DEFAULT now(),
+  proposal_title text,
+  sender_name text,
+  recipient_name text,
+  recipient_company text,
+  proposal_date date,
+  summary text,
+  call_to_action text,
+  deadline date,
+  status text DEFAULT 'Open' CHECK (status IN ('Open', 'Followed Up', 'Responded', 'Closed', 'Stalled')),
+  notes text,
+  pdf_url text,
+  pdf_filename text
+);
+
+ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all operations" ON proposals FOR ALL USING (true) WITH CHECK (true);
+```
+
+#### Storage bucket
+
+1. Go to **Storage** in your Supabase dashboard
+2. Create a new bucket named **`proposal-pdfs`**
+3. Set it to **Public**
+
+### 4. Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to `/dashboard`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Features
 
-## Learn More
+### Dashboard (`/dashboard`)
+- KPI cards: Total, Open, Followed Up, Average Days Live, Overdue alert
+- Filter by free-text search, company, and status
+- Click any row to open the detail drawer
+- Days Live colour coding: green < 14d, amber 14–30d, red > 30d
 
-To learn more about Next.js, take a look at the following resources:
+### Timeline (`/timeline`)
+- Gantt-style bars from proposal date to deadline
+- Zoom: 1 month, 3 months, 6 months, 1 year
+- Group by Company toggle
+- Hover tooltip with recipient, summary, and status
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Upload Flow
+1. Drag-and-drop or click to pick a PDF
+2. Claude extracts: title, sender, recipient, company, date, summary, CTA, deadline
+3. Edit any extracted fields before saving
+4. Saved to Supabase; PDF stored in `proposal-pdfs` bucket
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Proposal Drawer
+- Days Live prominently displayed with colour coding
+- Inline-edit: Status, Deadline, Notes
+- Link to open original PDF
+- Delete with confirmation
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/
+  api/
+    upload/         POST — PDF parse + Claude extraction
+    proposals/      GET (list) + POST (create)
+    proposals/[id]/ PATCH (update) + DELETE
+  dashboard/        Main dashboard page
+  timeline/         Gantt timeline page
+  layout.tsx        Root layout with nav + toast provider
+components/
+  ui/               Button, Input, Select, Textarea, Modal, Badge, Toast
+  proposals/        UploadModal, ProposalDrawer
+  NavBar.tsx
+lib/
+  supabase.ts       Supabase client helpers
+  utils.ts          Date formatting, colour helpers
+types/
+  proposal.ts       TypeScript interfaces
+supabase/
+  migrations/       SQL migration files
+```
+
+---
+
+## Notes
+
+- `pdf-parse` runs server-side only (listed in `serverComponentsExternalPackages`)
+- No authentication — single-user app with open RLS policy
+- All dates display as `DD MMM YYYY` (e.g. `13 May 2026`)
