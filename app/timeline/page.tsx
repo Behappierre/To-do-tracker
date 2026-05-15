@@ -161,7 +161,7 @@ export default function TimelinePage() {
                   e.stopPropagation()
                   setExpanded(prev => {
                     const next = new Set(prev)
-                    next.has(p.id) ? next.delete(p.id) : next.add(p.id)
+                    if (next.has(p.id)) { next.delete(p.id) } else { next.add(p.id) }
                     return next
                   })
                 }}

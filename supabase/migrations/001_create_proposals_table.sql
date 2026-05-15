@@ -13,15 +13,16 @@ CREATE TABLE IF NOT EXISTS proposals (
   status text DEFAULT 'Open' CHECK (status IN ('Open', 'Followed Up', 'Responded', 'Closed', 'Stalled')),
   notes text,
   pdf_url text,
-  pdf_filename text
+  pdf_filename text,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
 -- Enable Row Level Security
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
 
--- Allow all operations (single-user, no auth required)
-CREATE POLICY "Allow all operations" ON proposals
-  FOR ALL USING (true) WITH CHECK (true);
+-- Users can only access their own proposals
+CREATE POLICY "Users access own proposals" ON proposals
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- Create storage bucket for PDFs (run in Supabase dashboard Storage tab or via API)
 -- Bucket name: proposal-pdfs (public)
