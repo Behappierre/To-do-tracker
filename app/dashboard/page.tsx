@@ -138,7 +138,7 @@ export default function DashboardPage() {
     if (res.ok) {
       const updated = await res.json()
       setProposals(prev => prev.map(p => p.id === dragId ? updated : p))
-      setExpanded(prev => new Set([...prev, targetId]))
+      setExpanded(prev => { const next = new Set(prev); next.add(targetId); return next })
     }
   }
 
