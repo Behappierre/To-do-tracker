@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Search, FileText, TrendingUp, Clock, AlertTriangle, Users } from 'lucide-react'
+import { Plus, Search, FileText, TrendingUp, Clock, AlertTriangle, Users, ChevronRight, ChevronDown } from 'lucide-react'
 import { Proposal } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,6 +25,9 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState<Proposal | null>(null)
   const [sortKey, setSortKey] = useState<string>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const fetchProposals = useCallback(async () => {
     setLoading(true)
@@ -105,6 +108,121 @@ export default function DashboardPage() {
     return sortDir === 'asc' ? cmp : -cmp
   })
 
+  // Build tree — proposals whose parent isn't in the current result set are treated as roots
+  const idSet = new Set(sorted.map(p => p.id))
+  const childMap: Record<string, Proposal[]> = {}
+  const roots: Proposal[] = []
+  for (const p of sorted) {
+    if (p.parent_id && idSet.has(p.parent_id)) {
+      childMap[p.parent_id] = [...(childMap[p.parent_id] ?? []), p]
+    } else {
+      roots.push(p)
+    }
+  }
+
+  const handleDrop = async (targetId: string) => {
+    if (!dragId || dragId === targetId) return
+    // Target must be a root; source must not already have children
+    const target = proposals.find(p => p.id === targetId)
+    if (!target || target.parent_id) return
+    if (childMap[dragId]?.length) return
+
+    setDragOverId(null)
+    setDragId(null)
+
+    const res = await fetch(`/api/proposals/${dragId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_id: targetId }),
+    })
+    if (res.ok) {
+      const updated = await res.json()
+      setProposals(prev => prev.map(p => p.id === dragId ? updated : p))
+      setExpanded(prev => new Set([...prev, targetId]))
+    }
+  }
+
+  function ProposalRow({ p, isChild }: { p: Proposal; isChild: boolean }) {
+    const days = p.days_live ?? 0
+    const isOverdue = p.deadline &&
+      ['Open', 'Followed Up', 'Stalled'].includes(p.status) &&
+      differenceInDays(today, parseISO(p.deadline)) > 0
+    const children = childMap[p.id] ?? []
+    const hasChildren = children.length > 0
+    const isExpanded = expanded.has(p.id)
+    const isDragOver = dragOverId === p.id
+    const isBeingDragged = dragId === p.id
+    // A row can be a drop target if it's a root and the dragged item has no children of its own
+    const canReceiveDrop = !isChild && dragId && dragId !== p.id && !(childMap[dragId]?.length)
+
+    return (
+      <>
+        <tr
+          key={p.id}
+          draggable
+          onDragStart={() => setDragId(p.id)}
+          onDragEnd={() => { setDragId(null); setDragOverId(null) }}
+          onDragOver={e => {
+            if (canReceiveDrop) { e.preventDefault(); setDragOverId(p.id) }
+          }}
+          onDragLeave={() => { if (dragOverId === p.id) setDragOverId(null) }}
+          onDrop={e => { e.preventDefault(); handleDrop(p.id) }}
+          className={cn(
+            'hover:bg-gray-50 cursor-pointer transition-colors',
+            isChild && 'bg-gray-50/50',
+            isDragOver && 'ring-2 ring-indigo-400 ring-inset bg-indigo-50',
+            isBeingDragged && 'opacity-50',
+          )}
+          onClick={() => setSelected(p)}
+        >
+          <td className="px-4 py-3 font-medium text-gray-900 max-w-xs">
+            <div className={cn('flex items-center gap-1 truncate', isChild && 'pl-6')}>
+              {isChild && (
+                <span className="shrink-0 w-3 h-3 border-l-2 border-b-2 border-gray-300 rounded-bl -mt-2 mr-1" />
+              )}
+              {hasChildren && (
+                <button
+                  className="shrink-0 text-gray-400 hover:text-gray-700 p-0.5 rounded"
+                  onClick={e => {
+                    e.stopPropagation()
+                    setExpanded(prev => {
+                      const next = new Set(prev)
+                      next.has(p.id) ? next.delete(p.id) : next.add(p.id)
+                      return next
+                    })
+                  }}
+                >
+                  {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                </button>
+              )}
+              <span className={cn('truncate', isChild && 'text-gray-600 font-normal')}>
+                {p.proposal_title ?? '—'}
+              </span>
+              {hasChildren && (
+                <span className="ml-1 shrink-0 text-xs text-gray-400 font-normal">({children.length})</span>
+              )}
+            </div>
+          </td>
+          <td className="px-4 py-3 text-gray-600">{p.recipient_name ?? '—'}</td>
+          <td className="px-4 py-3 text-gray-600">{p.recipient_company ?? '—'}</td>
+          <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(p.proposal_date)}</td>
+          <td className="px-4 py-3 whitespace-nowrap">
+            <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
+          </td>
+          <td className={cn('px-4 py-3 whitespace-nowrap', isOverdue ? 'text-red-600 font-medium' : 'text-gray-500')}>
+            {formatDate(p.deadline)}
+          </td>
+          <td className="px-4 py-3">
+            <StatusBadge status={p.status} />
+          </td>
+        </tr>
+        {hasChildren && isExpanded && children.map(child => (
+          <ProposalRow key={child.id} p={child} isChild />
+        ))}
+      </>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -183,6 +301,11 @@ export default function DashboardPage() {
         <EmptyState onUpload={() => setUploadOpen(true)} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {dragId && (
+            <div className="px-4 py-2 text-xs text-indigo-600 bg-indigo-50 border-b border-indigo-100">
+              Drop onto a proposal to make it a parent
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -212,35 +335,9 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {sorted.map((p) => {
-                  const days = p.days_live ?? 0
-                  const isOverdue = p.deadline &&
-                    ['Open', 'Followed Up', 'Stalled'].includes(p.status) &&
-                    differenceInDays(today, parseISO(p.deadline)) > 0
-                  return (
-                    <tr
-                      key={p.id}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => setSelected(p)}
-                    >
-                      <td className="px-4 py-3 font-medium text-gray-900 max-w-xs truncate">
-                        {p.proposal_title ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{p.recipient_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{p.recipient_company ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(p.proposal_date)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
-                      </td>
-                      <td className={cn('px-4 py-3 whitespace-nowrap', isOverdue ? 'text-red-600 font-medium' : 'text-gray-500')}>
-                        {formatDate(p.deadline)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={p.status} />
-                      </td>
-                    </tr>
-                  )
-                })}
+                {roots.map((p) => (
+                  <ProposalRow key={p.id} p={p} isChild={false} />
+                ))}
               </tbody>
             </table>
           </div>
@@ -256,6 +353,7 @@ export default function DashboardPage() {
       {selected && (
         <ProposalDrawer
           proposal={selected}
+          proposals={proposals}
           onClose={() => setSelected(null)}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}

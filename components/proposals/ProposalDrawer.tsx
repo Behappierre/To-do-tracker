@@ -13,6 +13,7 @@ import { formatDate, daysLiveBg, cn } from '@/lib/utils'
 
 interface DrawerProps {
   proposal: Proposal | null
+  proposals: Proposal[]
   onClose: () => void
   onUpdated: (p: Proposal) => void
   onDeleted: (id: string) => void
@@ -20,11 +21,12 @@ interface DrawerProps {
 
 const STATUSES: ProposalStatus[] = ['Open', 'Followed Up', 'Responded', 'Closed', 'Stalled']
 
-export function ProposalDrawer({ proposal, onClose, onUpdated, onDeleted }: DrawerProps) {
+export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDeleted }: DrawerProps) {
   const { toast } = useToast()
   const [status, setStatus] = useState<ProposalStatus>('Open')
   const [notes, setNotes] = useState('')
   const [deadline, setDeadline] = useState('')
+  const [parentId, setParentId] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -33,6 +35,7 @@ export function ProposalDrawer({ proposal, onClose, onUpdated, onDeleted }: Draw
       setStatus(proposal.status)
       setNotes(proposal.notes ?? '')
       setDeadline(proposal.deadline ?? '')
+      setParentId(proposal.parent_id ?? '')
       setConfirmDelete(false)
     }
   }, [proposal])
@@ -41,13 +44,26 @@ export function ProposalDrawer({ proposal, onClose, onUpdated, onDeleted }: Draw
 
   const days = proposal.days_live ?? 0
 
+  // Proposals eligible to be parents: roots (no parent_id) other than this proposal
+  const parentOptions = proposals.filter(
+    p => p.id !== proposal.id && !p.parent_id
+  )
+
+  // Can't assign a parent if this proposal already has children
+  const hasChildren = proposals.some(p => p.parent_id === proposal.id)
+
   const handleSave = async () => {
     setSaving(true)
     try {
       const res = await fetch(`/api/proposals/${proposal.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, notes, deadline: deadline || null }),
+        body: JSON.stringify({
+          status,
+          notes,
+          deadline: deadline || null,
+          parent_id: parentId || null,
+        }),
       })
       const json = await res.json()
       if (!res.ok) { toast(json.error || 'Update failed', 'error'); return }
@@ -151,6 +167,27 @@ export function ProposalDrawer({ proposal, onClose, onUpdated, onDeleted }: Draw
             </div>
 
             <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Parent Proposal</label>
+              {hasChildren ? (
+                <p className="text-xs text-gray-400 italic py-1">
+                  This proposal has sub-proposals and cannot itself be a child.
+                </p>
+              ) : (
+                <Select
+                  value={parentId}
+                  onChange={(e) => setParentId(e.target.value)}
+                >
+                  <option value="">— None —</option>
+                  {parentOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.proposal_title ?? 'Untitled'}{p.recipient_company ? ` (${p.recipient_company})` : ''}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notes</label>
               <Textarea
                 rows={4}
@@ -205,4 +242,3 @@ function InfoRow({ icon, label, value }: { icon: ReactNode; label: string; value
     </div>
   )
 }
-

@@ -17,6 +17,7 @@ export interface Proposal {
   pdf_filename: string | null
   updated_at: string | null
   days_live?: number
+  parent_id?: string | null
 }
 
 export interface ExtractedProposal {

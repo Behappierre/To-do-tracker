@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Proposal, ProposalStatus } from '@/types/proposal'
 import { formatDate, cn } from '@/lib/utils'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
+import { ChevronRight, ChevronDown } from 'lucide-react'
 import {
   addMonths, differenceInDays, parseISO, startOfDay,
   format, isAfter, isBefore,
@@ -37,6 +38,7 @@ export default function TimelinePage() {
   const [groupByCompany, setGroupByCompany] = useState(false)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; proposal: Proposal } | null>(null)
   const [selected, setSelected] = useState<Proposal | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -74,6 +76,18 @@ export default function TimelinePage() {
   while (!isAfter(cur, windowEnd)) {
     monthLabels.push({ label: format(cur, zoom <= 3 ? 'MMM yyyy' : 'MMM yy'), left: pct(cur) })
     cur = addMonths(cur, 1)
+  }
+
+  // Build tree
+  const idSet = new Set(proposals.map(p => p.id))
+  const childMap: Record<string, Proposal[]> = {}
+  const roots: Proposal[] = []
+  for (const p of proposals) {
+    if (p.parent_id && idSet.has(p.parent_id)) {
+      childMap[p.parent_id] = [...(childMap[p.parent_id] ?? []), p]
+    } else {
+      roots.push(p)
+    }
   }
 
   // Build bar geometry for a proposal
@@ -119,15 +133,128 @@ export default function TimelinePage() {
     }
   }
 
-  const rows = groupByCompany
+  function ProposalRow({ p, isChild }: { p: Proposal; isChild: boolean }) {
+    const bar = getBar(p)
+    const status = p.status as ProposalStatus
+    const children = childMap[p.id] ?? []
+    const hasChildren = children.length > 0
+    const isExpanded = expanded.has(p.id)
+
+    return (
+      <>
+        <div className={cn('flex items-center border-b last:border-b-0 hover:bg-gray-50 group', isChild ? 'h-10 bg-gray-50/60' : 'h-12')}>
+          {/* Label */}
+          <div
+            className={cn(
+              'w-48 shrink-0 px-3 text-xs font-medium truncate border-r h-full flex items-center gap-1 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 transition-colors',
+              isChild ? 'text-gray-500 pl-6' : 'text-gray-700',
+            )}
+            onClick={() => setSelected(p)}
+          >
+            {isChild && (
+              <span className="shrink-0 w-3 h-3 border-l-2 border-b-2 border-gray-300 rounded-bl -mt-2 mr-0.5" />
+            )}
+            {hasChildren && (
+              <button
+                className="shrink-0 text-gray-400 hover:text-gray-700"
+                onClick={e => {
+                  e.stopPropagation()
+                  setExpanded(prev => {
+                    const next = new Set(prev)
+                    next.has(p.id) ? next.delete(p.id) : next.add(p.id)
+                    return next
+                  })
+                }}
+              >
+                {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              </button>
+            )}
+            <span className="truncate">{p.proposal_title ?? 'Untitled'}</span>
+          </div>
+
+          {/* Bar track */}
+          <div className="flex-1 relative h-full px-0">
+            {bar && (
+              <>
+                {/* Main bar */}
+                <div
+                  className={cn(
+                    'absolute rounded cursor-pointer transition-opacity hover:opacity-100 hover:ring-2 hover:ring-white hover:ring-offset-1',
+                    isChild ? 'top-2 h-5 opacity-75' : 'top-3 h-6',
+                    TERMINAL.has(status) ? 'opacity-60' : 'opacity-90',
+                    STATUS_BG[status]
+                  )}
+                  style={{ left: `${bar.left}%`, width: `${Math.max(bar.width, 0.4)}%` }}
+                  onClick={() => { setTooltip(null); setSelected(p) }}
+                  onMouseEnter={e => {
+                    const rect = containerRef.current?.getBoundingClientRect()
+                    if (rect) setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 10, proposal: p })
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
+                >
+                  {/* Recipient label inside bar if wide enough */}
+                  {bar.width > 8 && !isChild && (
+                    <span className="absolute inset-0 flex items-center px-2 text-white text-xs truncate leading-none">
+                      {p.recipient_name ?? p.recipient_company}
+                    </span>
+                  )}
+
+                  {/* Deadline marker — orange tick on the bar */}
+                  {bar.deadlinePct !== null && (
+                    <div
+                      className="absolute top-0 bottom-0 w-1 bg-orange-400 rounded"
+                      style={{ left: `${((bar.deadlinePct - bar.left) / Math.max(bar.width, 0.01)) * 100}%` }}
+                      title={`Deadline: ${formatDate(p.deadline)}`}
+                    />
+                  )}
+                </div>
+
+                {/* Last-action dot */}
+                {!TERMINAL.has(status) && bar.lastActionPct !== null && (
+                  <div
+                    className={cn('absolute rounded-full border-2 border-white shadow z-10 -translate-x-1/2 pointer-events-none', isChild ? 'top-3 w-3 h-3' : 'top-3.5 w-4 h-4')}
+                    style={{
+                      left: `${bar.right}%`,
+                      backgroundColor: STATUS_HEX[status],
+                    }}
+                    title={`Last action: ${formatDate(p.updated_at)}`}
+                  />
+                )}
+
+                {/* "Sent before window" indicator */}
+                {bar.sentBeforeWindow && (
+                  <div
+                    className="absolute top-3 h-6 flex items-center"
+                    style={{ left: '0%' }}
+                  >
+                    <span className="text-gray-400 text-xs mr-1">◀</span>
+                  </div>
+                )}
+              </>
+            )}
+            {!bar && (
+              <div className="absolute inset-0 flex items-center px-3">
+                <span className="text-xs text-gray-300 italic">outside window</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {hasChildren && isExpanded && children.map(child => (
+          <ProposalRow key={child.id} p={child} isChild />
+        ))}
+      </>
+    )
+  }
+
+  const groups = groupByCompany
     ? Object.entries(
-        proposals.reduce((acc, p) => {
+        roots.reduce((acc, p) => {
           const key = p.recipient_company ?? 'Unknown'
           acc[key] = [...(acc[key] ?? []), p]
           return acc
         }, {} as Record<string, Proposal[]>)
       )
-    : [['All Proposals', proposals] as [string, Proposal[]]]
+    : [['All Proposals', roots] as [string, Proposal[]]]
 
   if (loading) {
     return (
@@ -215,95 +342,16 @@ export default function TimelinePage() {
               <span className="absolute -top-0.5 left-1 text-xs text-indigo-500 font-semibold whitespace-nowrap">Today</span>
             </div>
 
-            {rows.map(([group, items]) => (
+            {groups.map(([group, items]) => (
               <div key={group}>
                 {groupByCompany && (
                   <div className="sticky left-0 px-4 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b z-20">
                     {group}
                   </div>
                 )}
-                {(items as Proposal[]).map(p => {
-                  const bar = getBar(p)
-                  const status = p.status as ProposalStatus
-                  return (
-                    <div key={p.id} className="flex items-center border-b last:border-b-0 hover:bg-gray-50 group h-12">
-                      {/* Label — also clickable */}
-                      <div
-                        className="w-48 shrink-0 px-3 text-xs text-gray-700 font-medium truncate border-r h-full flex items-center cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                        onClick={() => setSelected(p)}
-                      >
-                        {p.proposal_title ?? 'Untitled'}
-                      </div>
-
-                      {/* Bar track */}
-                      <div className="flex-1 relative h-full px-0">
-                        {bar && (
-                          <>
-                            {/* Main bar */}
-                            <div
-                              className={cn(
-                                'absolute top-3 h-6 rounded cursor-pointer transition-opacity hover:opacity-100 hover:ring-2 hover:ring-white hover:ring-offset-1',
-                                TERMINAL.has(status) ? 'opacity-60' : 'opacity-90',
-                                STATUS_BG[status]
-                              )}
-                              style={{ left: `${bar.left}%`, width: `${Math.max(bar.width, 0.4)}%` }}
-                              onClick={() => { setTooltip(null); setSelected(p) }}
-                              onMouseEnter={e => {
-                                const rect = containerRef.current?.getBoundingClientRect()
-                                if (rect) setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 10, proposal: p })
-                              }}
-                              onMouseLeave={() => setTooltip(null)}
-                            >
-                              {/* Recipient label inside bar if wide enough */}
-                              {bar.width > 8 && (
-                                <span className="absolute inset-0 flex items-center px-2 text-white text-xs truncate leading-none">
-                                  {p.recipient_name ?? p.recipient_company}
-                                </span>
-                              )}
-
-                              {/* Deadline marker — orange tick on the bar */}
-                              {bar.deadlinePct !== null && (
-                                <div
-                                  className="absolute top-0 bottom-0 w-1 bg-orange-400 rounded"
-                                  style={{ left: `${((bar.deadlinePct - bar.left) / Math.max(bar.width, 0.01)) * 100}%` }}
-                                  title={`Deadline: ${formatDate(p.deadline)}`}
-                                />
-                              )}
-                            </div>
-
-                            {/* Last-action dot — sits on the right edge of the bar */}
-                            {!TERMINAL.has(status) && bar.lastActionPct !== null && (
-                              <div
-                                className="absolute top-3.5 w-4 h-4 rounded-full border-2 border-white shadow z-10 -translate-x-1/2 pointer-events-none"
-                                style={{
-                                  left: `${bar.right}%`,
-                                  backgroundColor: STATUS_HEX[status],
-                                }}
-                                title={`Last action: ${formatDate(p.updated_at)}`}
-                              />
-                            )}
-
-                            {/* "Sent before window" indicator */}
-                            {bar.sentBeforeWindow && (
-                              <div
-                                className="absolute top-3 h-6 flex items-center"
-                                style={{ left: '0%' }}
-                              >
-                                <span className="text-gray-400 text-xs mr-1">◀</span>
-                              </div>
-                            )}
-                          </>
-                        )}
-                        {/* No bar — proposal outside window */}
-                        {!bar && (
-                          <div className="absolute inset-0 flex items-center px-3">
-                            <span className="text-xs text-gray-300 italic">outside window</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+                {(items as Proposal[]).map(p => (
+                  <ProposalRow key={p.id} p={p} isChild={false} />
+                ))}
               </div>
             ))}
 
@@ -344,6 +392,7 @@ export default function TimelinePage() {
       {selected && (
         <ProposalDrawer
           proposal={selected}
+          proposals={proposals}
           onClose={() => setSelected(null)}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}

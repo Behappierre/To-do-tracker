@@ -1,0 +1,2 @@
+ALTER TABLE proposals
+  ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES proposals(id) ON DELETE SET NULL;

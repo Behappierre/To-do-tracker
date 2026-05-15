@@ -11,7 +11,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const body = await req.json()
     const allowed = ['status', 'notes', 'deadline', 'proposal_title', 'sender_name',
-      'recipient_name', 'recipient_company', 'proposal_date', 'summary', 'call_to_action']
+      'recipient_name', 'recipient_company', 'proposal_date', 'summary', 'call_to_action', 'parent_id']
 
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
