@@ -247,7 +247,7 @@ export default function DashboardPage() {
               {isChild && <span className="shrink-0 w-3 h-3 border-l-2 border-b-2 border-gray-300 rounded-bl -mt-2 mr-1" />}
               {hasChildren && (
                 <button className="shrink-0 text-gray-400 hover:text-gray-700 p-0.5 rounded"
-                  onClick={e => { e.stopPropagation(); setExpanded(prev => { const next = new Set(prev); next.has(a.id) ? next.delete(a.id) : next.add(a.id); return next }) }}>
+                  onClick={e => { e.stopPropagation(); setExpanded(prev => { const next = new Set(prev); if (next.has(a.id)) { next.delete(a.id) } else { next.add(a.id) } return next }) }}>
                   {isExpandedRow ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                 </button>
               )}
@@ -318,9 +318,9 @@ export default function DashboardPage() {
   const groups = buildGroups(actions)
 
   const toggleAccount = (key: string) =>
-    setCollapsedAccounts(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
+    setCollapsedAccounts(prev => { const next = new Set(prev); if (next.has(key)) { next.delete(key) } else { next.add(key) } return next })
   const toggleTheme = (key: string) =>
-    setCollapsedThemes(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
+    setCollapsedThemes(prev => { const next = new Set(prev); if (next.has(key)) { next.delete(key) } else { next.add(key) } return next })
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
