@@ -1,19 +1,17 @@
-# ProposalTracker
+# BD Action Tracker
 
-Sending proposals is the easy part. Knowing what happened to them is not.
+After every client meeting you produce a structured summary. But the "Actions and Next Steps" section — with its list of who is doing what, by when, and blocked on what — disappears into a folder and is never seen again.
 
-ProposalTracker is an AI-powered pipeline for managing your outbound business development. You upload a PDF — a single proposal or an entire export of sent emails — and Claude reads through every message, extracts the key information, and adds each proposal to a structured database. From that moment on, you have a living record: who you contacted, what you proposed, when you sent it, whether there is a deadline, and exactly how long it has been sitting without a response.
+BD Action Tracker solves this. You paste in a meeting summary (or upload a PDF) and Claude reads through every action item, extracts the structured fields, and adds each one to a living database. From that moment on, you have a single view of every open thread: who owns it (your team or the client's), how long it has been sitting without a touch, whether it has a deadline, what it is blocked on, and what the parallel route is if it stalls.
 
-The dashboard gives you an at-a-glance view of your pipeline. Which proposals are still open? Which ones have been followed up? How many are past their deadline? The timeline view maps every proposal onto a Gantt-style chart so you can see at a glance how your outreach effort is distributed over time — which clients have been waiting the longest, where activity has been concentrated, and what is coming up. Clicking any bar or row opens a detail panel where you can update the status, record notes, adjust the deadline, or pull up the original PDF.
-
-The goal is simple: no more lost proposals, no more "when did I send that?", and no more following up too late.
+The dashboard shows you where the bottlenecks are. The timeline makes it visually obvious which accounts have client-side actions piling up. The detail drawer lets you log a nudge, update the status, or note an alternative path — and the "days quiet" counter resets every time you touch a record.
 
 ## Tech Stack
 
 - **Next.js 14** (App Router, TypeScript)
 - **Tailwind CSS** — utility-first styling
 - **Supabase** — Postgres database + file storage
-- **Anthropic Claude API** — PDF intelligence extraction (`claude-sonnet-4-20250514`)
+- **Anthropic Claude API** — meeting summary extraction (`claude-sonnet-4-20250514`)
 - **pdf-parse** — server-side PDF text extraction
 
 ---
@@ -49,24 +47,36 @@ cp .env.local.example .env.local
 Run the following SQL in the Supabase SQL Editor (Dashboard → SQL Editor):
 
 ```sql
--- Create the proposals table
+-- Create the actions table (stored as `proposals` internally)
 CREATE TABLE IF NOT EXISTS proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-  proposal_title text,
-  sender_name text,
-  recipient_name text,
-  recipient_company text,
-  proposal_date date,
+
+  -- Core action fields
+  title text,
+  account_name text,
+  contact_name text,
+  owner text NOT NULL DEFAULT 'them' CHECK (owner IN ('us', 'them')),
+  source_date date,
+  expected_by date,
+  expected_by_is_approximate boolean NOT NULL DEFAULT false,
+  status text DEFAULT 'Open'
+    CHECK (status IN ('Open', 'Nudged', 'In Progress', 'Done', 'Stalled', 'Superseded')),
+  strategic_weight text
+    CHECK (strategic_weight IN ('Low', 'Medium', 'Medium-High', 'High')),
+  dependencies text,
+  parallel_route text,
   summary text,
-  call_to_action text,
-  deadline date,
-  status text DEFAULT 'Open' CHECK (status IN ('Open', 'Followed Up', 'Responded', 'Closed', 'Stalled')),
   notes text,
+
+  -- Source document
   pdf_url text,
-  pdf_filename text
+  pdf_filename text,
+
+  -- Hierarchy (parent/child actions)
+  parent_id uuid REFERENCES proposals(id) ON DELETE SET NULL
 );
 
 -- Keep updated_at current on every row update
@@ -82,7 +92,6 @@ CREATE OR REPLACE TRIGGER proposals_updated_at
 -- Enable Row Level Security
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
 
--- Each user can only see and manage their own proposals
 CREATE POLICY "Users can view own proposals"
   ON proposals FOR SELECT USING (auth.uid() = user_id);
 
@@ -96,9 +105,7 @@ CREATE POLICY "Users can delete own proposals"
   ON proposals FOR DELETE USING (auth.uid() = user_id);
 ```
 
-> **Existing data?** If you added rows before auth was set up, run:
-> `UPDATE proposals SET user_id = '<your-user-id>' WHERE user_id IS NULL;`
-> Find your user ID in Supabase → Authentication → Users.
+> **Existing ProposalTracker data?** Run migration `003_bd_action_tracker.sql` from `supabase/migrations/` against your existing database to rename columns and update the status enum in place. Back up first.
 
 #### Storage bucket
 
@@ -119,31 +126,38 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 ## Features
 
 ### Dashboard (`/dashboard`)
-- KPI cards: Total, Open, Followed Up, Average Days Live, Overdue alert
-- Filter by free-text search, company, and status
+
+- **KPI cards**: Total Open, Awaiting Client (owner=them, status Open/Nudged), Avg Days Quiet, Overdue
+- **Filters**: free-text search, account, owner (us / client), status, strategic weight
+- **Days Quiet** colour coding based on `updated_at` (last touch): green < 14d, amber 14–30d, red > 30d
 - Click any row to open the detail drawer
-- Days Live colour coding: green < 14d, amber 14–30d, red > 30d
+- Approximate expected-by dates shown with `~` suffix
 
 ### Timeline (`/timeline`)
-- Gantt-style bars spanning from the proposal send date to the last action (or today for active proposals)
-- Looks back over the selected window so you see your real history, not the future
-- Orange tick marker on any proposal with a deadline
-- Last-action dot shows when you most recently touched a proposal
+
+- Gantt-style bars spanning from the meeting date to the last action (or today for active items)
+- **Bars coloured by owner**: indigo = our team, orange = client side — bottlenecks are immediately visible
+- **Group by Account** toggle (on by default)
+- Expected-by marker: solid orange = exact date, lighter/muted = approximate
 - Zoom: 1 month, 3 months, 6 months, 1 year
-- Group by Company toggle
-- Hover tooltip with recipient, summary, and status
+- Hover tooltip with contact, summary, owner, and dates
 - Click any bar or label to open the detail drawer
 
-### Upload Flow
-1. Drag-and-drop or click to pick a PDF
-2. Claude extracts: title, sender, recipient, company, date, summary, CTA, deadline
-3. Edit any extracted fields before saving
-4. Saved to Supabase; PDF stored in `proposal-pdfs` bucket
+### Import Flow
 
-### Proposal Drawer
-- Days Live prominently displayed with colour coding
-- Inline-edit: Status, Deadline, Notes
-- Link to open original PDF
+1. Click **Import Meeting Summary** to open the modal
+2. Choose **PDF Upload** (drag-and-drop) or **Paste Text** (paste your Markdown/plain-text summary directly)
+3. Claude extracts every action item from the "Actions and Next Steps" section as separate rows
+4. Review and edit each extracted action in the preview — adjust owner, dates, weight, etc.
+5. Uncheck any actions you don't want to save
+6. Actions are saved to Supabase; PDFs are stored in the `proposal-pdfs` bucket
+
+### Action Drawer
+
+- **Days Quiet** prominently displayed with colour coding — based on `updated_at`, so it resets whenever you edit the record
+- **Mark Nudged** quick-action button: sets status to `Nudged` and resets the days counter without opening the full edit form
+- Inline-edit: Status, Owner, Expected By (with approximate flag), Strategic Weight, Dependencies, Parallel Route, Notes
+- Link to open source document (if uploaded as PDF)
 - Delete with confirmation
 
 ---
@@ -153,23 +167,23 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 ```
 app/
   api/
-    upload/         POST — PDF parse + Claude extraction
-    proposals/      GET (list) + POST (create)
+    upload/         POST — PDF/text parse + Claude extraction
+    proposals/      GET (list with filters) + POST (create)
     proposals/[id]/ PATCH (update) + DELETE
-  dashboard/        Main dashboard page
+  dashboard/        Main BD actions dashboard
   timeline/         Gantt timeline page
   layout.tsx        Root layout with nav + toast provider
 components/
   ui/               Button, Input, Select, Textarea, Modal, Badge, Toast
-  proposals/        UploadModal, ProposalDrawer
+  proposals/        UploadModal (PDF + paste), ProposalDrawer
   NavBar.tsx
 lib/
   supabase.ts       Supabase client helpers
   utils.ts          Date formatting, colour helpers
 types/
-  proposal.ts       TypeScript interfaces
+  proposal.ts       TypeScript interfaces (Action, ActionStatus, StrategicWeight, …)
 supabase/
-  migrations/       SQL migration files
+  migrations/       001 initial table · 002 parent_id · 003 BD action tracker fields
 ```
 
 ---
@@ -177,6 +191,7 @@ supabase/
 ## Notes
 
 - `pdf-parse` runs server-side only (listed in `serverComponentsExternalPackages`)
-- Authentication via Supabase Auth; RLS restricts every user to their own proposals
+- Authentication via Supabase Auth; RLS restricts every user to their own records
 - Sign in with email + password, or use a magic link for passwordless access
-- All dates display as `DD MMM YYYY` (e.g. `13 May 2026`)
+- All dates display as `DD MMM YYYY` (e.g. `13 Jun 2026`)
+- **Days Quiet** is calculated from `updated_at`, not `created_at` — touching a record (updating any field, including status to `Nudged`) resets the counter

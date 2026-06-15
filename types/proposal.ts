@@ -1,17 +1,22 @@
-export type ProposalStatus = 'Open' | 'Followed Up' | 'Responded' | 'Closed' | 'Stalled'
+export type ActionStatus = 'Open' | 'Nudged' | 'In Progress' | 'Done' | 'Stalled' | 'Superseded'
+export type ActionOwner = 'us' | 'them'
+export type StrategicWeight = 'Low' | 'Medium' | 'Medium-High' | 'High'
 
-export interface Proposal {
+export interface Action {
   id: string
   created_at: string
-  proposal_title: string | null
-  sender_name: string | null
-  recipient_name: string | null
-  recipient_company: string | null
-  proposal_date: string | null
+  title: string | null
+  account_name: string | null
+  contact_name: string | null
+  owner: ActionOwner
+  source_date: string | null
+  expected_by: string | null
+  expected_by_is_approximate: boolean
+  status: ActionStatus
+  strategic_weight: StrategicWeight | null
+  dependencies: string | null
+  parallel_route: string | null
   summary: string | null
-  call_to_action: string | null
-  deadline: string | null
-  status: ProposalStatus
   notes: string | null
   pdf_url: string | null
   pdf_filename: string | null
@@ -20,13 +25,21 @@ export interface Proposal {
   parent_id?: string | null
 }
 
-export interface ExtractedProposal {
-  proposal_title: string | null
-  sender_name: string | null
-  recipient_name: string | null
-  recipient_company: string | null
-  proposal_date: string | null
+export interface ExtractedAction {
+  title: string | null
+  account_name: string | null
+  contact_name: string | null
+  owner: ActionOwner
+  source_date: string | null
+  expected_by: string | null
+  expected_by_is_approximate: boolean
+  strategic_weight: StrategicWeight | null
+  dependencies: string | null
   summary: string | null
-  call_to_action: string | null
-  deadline: string | null
+  status: ActionStatus
 }
+
+// Aliases so any code not yet migrated continues to compile
+export type Proposal = Action
+export type ProposalStatus = ActionStatus
+export type ExtractedProposal = ExtractedAction

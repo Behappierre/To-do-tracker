@@ -16,20 +16,24 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url)
-    const company = searchParams.get('company')
-    const status = searchParams.get('status')
-    const search = searchParams.get('search')
+    const account = searchParams.get('account')
+    const status  = searchParams.get('status')
+    const owner   = searchParams.get('owner')
+    const weight  = searchParams.get('weight')
+    const search  = searchParams.get('search')
 
     let query = supabase
       .from('proposals')
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (company) query = query.ilike('recipient_company', `%${company}%`)
+    if (account) query = query.ilike('account_name', `%${account}%`)
     if (status && status !== 'All') query = query.eq('status', status)
+    if (owner && owner !== 'All') query = query.eq('owner', owner)
+    if (weight && weight !== 'All') query = query.eq('strategic_weight', weight)
     if (search) {
       query = query.or(
-        `proposal_title.ilike.%${search}%,recipient_name.ilike.%${search}%,recipient_company.ilike.%${search}%`
+        `title.ilike.%${search}%,contact_name.ilike.%${search}%,account_name.ilike.%${search}%`
       )
     }
 
@@ -40,12 +44,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const proposals = (data || []).map((p) => ({
+    const actions = (data || []).map((p) => ({
       ...p,
-      days_live: computeDaysLive(p.proposal_date),
+      days_live: computeDaysLive(p.updated_at),
     }))
 
-    return NextResponse.json(proposals)
+    return NextResponse.json(actions)
   } catch (err) {
     console.error('GET /api/proposals error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -63,7 +67,6 @@ export async function POST(req: NextRequest) {
     const serviceClient = getServiceClient()
     const body = await req.json()
 
-    // Upload PDF file if provided as base64
     let pdf_url = body.pdf_url || null
     if (body.pdfBase64 && body.pdf_filename) {
       const buffer = Buffer.from(body.pdfBase64, 'base64')
@@ -82,12 +85,12 @@ export async function POST(req: NextRequest) {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { pdfBase64, ...proposalData } = body
+    const { pdfBase64, ...actionData } = body
 
     const { data, error } = await supabase
       .from('proposals')
       .insert({
-        ...proposalData,
+        ...actionData,
         pdf_url,
         user_id: user.id,
       })
@@ -98,7 +101,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ ...data, days_live: computeDaysLive(data.proposal_date) })
+    return NextResponse.json({ ...data, days_live: computeDaysLive(data.updated_at) })
   } catch (err) {
     console.error('POST /api/proposals error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

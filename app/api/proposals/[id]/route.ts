@@ -10,15 +10,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (authError || !user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
     const body = await req.json()
-    const allowed = ['status', 'notes', 'deadline', 'proposal_title', 'sender_name',
-      'recipient_name', 'recipient_company', 'proposal_date', 'summary', 'call_to_action', 'parent_id']
+    const allowed = [
+      'status', 'notes', 'expected_by', 'expected_by_is_approximate',
+      'title', 'account_name', 'contact_name', 'source_date', 'summary',
+      'owner', 'strategic_weight', 'dependencies', 'parallel_route', 'parent_id',
+    ]
 
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]
     }
 
-    // RLS ensures the row belongs to the authenticated user
     const { data, error } = await supabase
       .from('proposals')
       .update(updates)
@@ -28,7 +30,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ ...data, days_live: computeDaysLive(data.proposal_date) })
+    return NextResponse.json({ ...data, days_live: computeDaysLive(data.updated_at) })
   } catch (err) {
     console.error('PATCH error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -41,16 +43,14 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-    // Get the proposal first (RLS ensures ownership)
-    const { data: proposal } = await supabase
+    const { data: action } = await supabase
       .from('proposals')
       .select('pdf_url, pdf_filename')
       .eq('id', params.id)
       .single()
 
-    // Delete the PDF from storage if it exists (storage removal needs service role)
-    if (proposal?.pdf_url) {
-      const url = new URL(proposal.pdf_url)
+    if (action?.pdf_url) {
+      const url = new URL(action.pdf_url)
       const pathParts = url.pathname.split('/proposal-pdfs/')
       if (pathParts.length > 1) {
         const serviceClient = getServiceClient()
@@ -58,7 +58,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       }
     }
 
-    // RLS ensures the row belongs to the authenticated user
     const { error } = await supabase.from('proposals').delete().eq('id', params.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

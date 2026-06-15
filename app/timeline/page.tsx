@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Proposal, ProposalStatus } from '@/types/proposal'
+import { Action } from '@/types/proposal'
 import { formatDate, cn } from '@/lib/utils'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
 import { ChevronRight, ChevronDown } from 'lucide-react'
@@ -10,66 +10,51 @@ import {
   format, isAfter, isBefore,
 } from 'date-fns'
 
-// Colours per status
-const STATUS_BG: Record<ProposalStatus, string> = {
-  Open: 'bg-blue-500',
-  'Followed Up': 'bg-yellow-500',
-  Responded: 'bg-green-500',
-  Closed: 'bg-gray-400',
-  Stalled: 'bg-red-500',
-}
-const STATUS_HEX: Record<ProposalStatus, string> = {
-  Open: '#3b82f6',
-  'Followed Up': '#eab308',
-  Responded: '#22c55e',
-  Closed: '#9ca3af',
-  Stalled: '#ef4444',
-}
+// Bars are coloured by owner, not status
+const OWNER_BG  = { us: 'bg-indigo-500',   them: 'bg-orange-400'   }
+const OWNER_HEX = { us: '#6366f1',          them: '#fb923c'          }
 
-// Statuses where the proposal is no longer actively live
-const TERMINAL = new Set<ProposalStatus>(['Responded', 'Closed'])
+// Statuses where the action is no longer actively live
+const TERMINAL = new Set(['Done', 'Superseded'])
 
 const ZOOM_MONTHS = [1, 3, 6, 12]
 
 export default function TimelinePage() {
-  const [proposals, setProposals] = useState<Proposal[]>([])
-  const [loading, setLoading] = useState(true)
-  const [zoom, setZoom] = useState(3)
-  const [groupByCompany, setGroupByCompany] = useState(false)
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; proposal: Proposal } | null>(null)
-  const [selected, setSelected] = useState<Proposal | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [actions, setActions]         = useState<Action[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [zoom, setZoom]               = useState(3)
+  const [groupByAccount, setGroupByAccount] = useState(true)
+  const [tooltip, setTooltip]         = useState<{ x: number; y: number; action: Action } | null>(null)
+  const [selected, setSelected]       = useState<Action | null>(null)
+  const [expanded, setExpanded]       = useState<Set<string>>(new Set())
+  const containerRef                  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetch('/api/proposals')
       .then((r) => r.json())
-      .then((d) => { setProposals(Array.isArray(d) ? d : []); setLoading(false) })
+      .then((d) => { setActions(Array.isArray(d) ? d : []); setLoading(false) })
   }, [])
 
-  const handleUpdated = (updated: Proposal) => {
-    setProposals(prev => prev.map(p => p.id === updated.id ? updated : p))
+  const handleUpdated = (updated: Action) => {
+    setActions(prev => prev.map(a => a.id === updated.id ? updated : a))
     setSelected(updated)
   }
 
   const handleDeleted = (id: string) => {
-    setProposals(prev => prev.filter(p => p.id !== id))
+    setActions(prev => prev.filter(a => a.id !== id))
     setSelected(null)
   }
 
-  const today = startOfDay(new Date())
-  // Show history: window runs from (today - zoom months) to (today + 1 month for deadlines)
+  const today       = startOfDay(new Date())
   const windowStart = addMonths(today, -zoom)
-  const windowEnd = addMonths(today, 1)
-  const totalDays = differenceInDays(windowEnd, windowStart)
+  const windowEnd   = addMonths(today, 1)
+  const totalDays   = differenceInDays(windowEnd, windowStart)
 
-  // Convert a date to a % position in the window. Clamped to [0,100].
   const pct = (date: Date) => {
     const raw = (differenceInDays(date, windowStart) / totalDays) * 100
     return Math.min(100, Math.max(0, raw))
   }
 
-  // Month header labels
   const monthLabels: { label: string; left: number }[] = []
   let cur = new Date(windowStart.getFullYear(), windowStart.getMonth(), 1)
   if (isBefore(cur, windowStart)) cur = addMonths(cur, 1)
@@ -78,46 +63,41 @@ export default function TimelinePage() {
     cur = addMonths(cur, 1)
   }
 
-  // Build tree
-  const idSet = new Set(proposals.map(p => p.id))
-  const childMap: Record<string, Proposal[]> = {}
-  const roots: Proposal[] = []
-  for (const p of proposals) {
-    if (p.parent_id && idSet.has(p.parent_id)) {
-      childMap[p.parent_id] = [...(childMap[p.parent_id] ?? []), p]
+  const idSet = new Set(actions.map(a => a.id))
+  const childMap: Record<string, Action[]> = {}
+  const roots: Action[] = []
+  for (const a of actions) {
+    if (a.parent_id && idSet.has(a.parent_id)) {
+      childMap[a.parent_id] = [...(childMap[a.parent_id] ?? []), a]
     } else {
-      roots.push(p)
+      roots.push(a)
     }
   }
 
-  // Build bar geometry for a proposal
-  const getBar = (p: Proposal) => {
-    if (!p.proposal_date) return null
-    const sent = parseISO(p.proposal_date)
+  const getBar = (a: Action) => {
+    if (!a.source_date) return null
+    const sent = parseISO(a.source_date)
 
-    // Bar ends at: updated_at for terminal statuses, otherwise today
-    const lastAction = p.updated_at ? parseISO(p.updated_at) : today
-    const barEnd = TERMINAL.has(p.status) ? lastAction : today
+    const lastAction = a.updated_at ? parseISO(a.updated_at) : today
+    const barEnd     = TERMINAL.has(a.status) ? lastAction : today
 
-    // Deadline marker position (null if no deadline or outside window)
-    let deadlinePct: number | null = null
-    if (p.deadline) {
-      const dl = parseISO(p.deadline)
-      if (!isBefore(dl, windowStart) && !isAfter(dl, windowEnd)) {
-        deadlinePct = pct(dl)
+    // Expected-by marker
+    let expectedByPct: number | null = null
+    if (a.expected_by) {
+      const eb = parseISO(a.expected_by)
+      if (!isBefore(eb, windowStart) && !isAfter(eb, windowEnd)) {
+        expectedByPct = pct(eb)
       }
     }
 
-    // Last-action marker (only meaningful if proposal is not terminal and action is in window)
     let lastActionPct: number | null = null
-    if (!TERMINAL.has(p.status) && p.updated_at) {
-      const la = parseISO(p.updated_at)
+    if (!TERMINAL.has(a.status) && a.updated_at) {
+      const la = parseISO(a.updated_at)
       if (!isBefore(la, windowStart) && !isAfter(la, windowEnd)) {
         lastActionPct = pct(la)
       }
     }
 
-    // Clamp bar to window
     const clampedStart = isAfter(sent, windowEnd) ? windowEnd : isBefore(sent, windowStart) ? windowStart : sent
     const clampedEnd   = isAfter(barEnd, windowEnd) ? windowEnd : isBefore(barEnd, windowStart) ? windowStart : barEnd
 
@@ -127,18 +107,19 @@ export default function TimelinePage() {
       left:  pct(clampedStart),
       right: pct(clampedEnd),
       width: pct(clampedEnd) - pct(clampedStart),
-      deadlinePct,
+      expectedByPct,
       lastActionPct,
       sentBeforeWindow: isBefore(sent, windowStart),
+      approximate: a.expected_by_is_approximate,
     }
   }
 
-  function ProposalRow({ p, isChild }: { p: Proposal; isChild: boolean }) {
-    const bar = getBar(p)
-    const status = p.status as ProposalStatus
-    const children = childMap[p.id] ?? []
+  function ActionRow({ a, isChild }: { a: Action; isChild: boolean }) {
+    const bar         = getBar(a)
+    const ownerKey    = (a.owner ?? 'them') as 'us' | 'them'
+    const children    = childMap[a.id] ?? []
     const hasChildren = children.length > 0
-    const isExpanded = expanded.has(p.id)
+    const isExpanded  = expanded.has(a.id)
 
     return (
       <>
@@ -149,7 +130,7 @@ export default function TimelinePage() {
               'w-48 shrink-0 px-3 text-xs font-medium truncate border-r h-full flex items-center gap-1 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 transition-colors',
               isChild ? 'text-gray-500 pl-6' : 'text-gray-700',
             )}
-            onClick={() => setSelected(p)}
+            onClick={() => setSelected(a)}
           >
             {isChild && (
               <span className="shrink-0 w-3 h-3 border-l-2 border-b-2 border-gray-300 rounded-bl -mt-2 mr-0.5" />
@@ -161,7 +142,7 @@ export default function TimelinePage() {
                   e.stopPropagation()
                   setExpanded(prev => {
                     const next = new Set(prev)
-                    if (next.has(p.id)) { next.delete(p.id) } else { next.add(p.id) }
+                    if (next.has(a.id)) { next.delete(a.id) } else { next.add(a.id) }
                     return next
                   })
                 }}
@@ -169,64 +150,63 @@ export default function TimelinePage() {
                 {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
               </button>
             )}
-            <span className="truncate">{p.proposal_title ?? 'Untitled'}</span>
+            <span className="truncate">{a.title ?? 'Untitled'}</span>
           </div>
 
           {/* Bar track */}
           <div className="flex-1 relative h-full px-0">
             {bar && (
               <>
-                {/* Main bar */}
+                {/* Main bar, coloured by owner */}
                 <div
                   className={cn(
                     'absolute rounded cursor-pointer transition-opacity hover:opacity-100 hover:ring-2 hover:ring-white hover:ring-offset-1',
                     isChild ? 'top-2 h-5 opacity-75' : 'top-3 h-6',
-                    TERMINAL.has(status) ? 'opacity-60' : 'opacity-90',
-                    STATUS_BG[status]
+                    TERMINAL.has(a.status) ? 'opacity-50' : 'opacity-90',
+                    OWNER_BG[ownerKey],
                   )}
                   style={{ left: `${bar.left}%`, width: `${Math.max(bar.width, 0.4)}%` }}
-                  onClick={() => { setTooltip(null); setSelected(p) }}
+                  onClick={() => { setTooltip(null); setSelected(a) }}
                   onMouseEnter={e => {
                     const rect = containerRef.current?.getBoundingClientRect()
-                    if (rect) setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 10, proposal: p })
+                    if (rect) setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 10, action: a })
                   }}
                   onMouseLeave={() => setTooltip(null)}
                 >
-                  {/* Recipient label inside bar if wide enough */}
+                  {/* Contact label inside bar if wide enough */}
                   {bar.width > 8 && !isChild && (
                     <span className="absolute inset-0 flex items-center px-2 text-white text-xs truncate leading-none">
-                      {p.recipient_name ?? p.recipient_company}
+                      {a.contact_name ?? a.account_name}
                     </span>
                   )}
 
-                  {/* Deadline marker — orange tick on the bar */}
-                  {bar.deadlinePct !== null && (
+                  {/* Expected-by marker — solid if exact, dashed/lighter if approximate */}
+                  {bar.expectedByPct !== null && (
                     <div
-                      className="absolute top-0 bottom-0 w-1 bg-orange-400 rounded"
-                      style={{ left: `${((bar.deadlinePct - bar.left) / Math.max(bar.width, 0.01)) * 100}%` }}
-                      title={`Deadline: ${formatDate(p.deadline)}`}
+                      className={cn(
+                        'absolute top-0 bottom-0 w-1 rounded',
+                        bar.approximate ? 'bg-orange-300 opacity-60' : 'bg-orange-500',
+                      )}
+                      style={{ left: `${((bar.expectedByPct - bar.left) / Math.max(bar.width, 0.01)) * 100}%` }}
+                      title={`Expected by: ${formatDate(a.expected_by)}${bar.approximate ? ' (approx)' : ''}`}
                     />
                   )}
                 </div>
 
                 {/* Last-action dot */}
-                {!TERMINAL.has(status) && bar.lastActionPct !== null && (
+                {!TERMINAL.has(a.status) && bar.lastActionPct !== null && (
                   <div
                     className={cn('absolute rounded-full border-2 border-white shadow z-10 -translate-x-1/2 pointer-events-none', isChild ? 'top-3 w-3 h-3' : 'top-3.5 w-4 h-4')}
                     style={{
                       left: `${bar.right}%`,
-                      backgroundColor: STATUS_HEX[status],
+                      backgroundColor: OWNER_HEX[ownerKey],
                     }}
-                    title={`Last action: ${formatDate(p.updated_at)}`}
+                    title={`Last action: ${formatDate(a.updated_at)}`}
                   />
                 )}
 
-                {/* "Sent before window" indicator */}
                 {bar.sentBeforeWindow && (
-                  <div
-                    className="absolute top-3 h-6 flex items-center"
-                    style={{ left: '0%' }}
-                  >
+                  <div className="absolute top-3 h-6 flex items-center" style={{ left: '0%' }}>
                     <span className="text-gray-400 text-xs mr-1">◀</span>
                   </div>
                 )}
@@ -240,21 +220,21 @@ export default function TimelinePage() {
           </div>
         </div>
         {hasChildren && isExpanded && children.map(child => (
-          <ProposalRow key={child.id} p={child} isChild />
+          <ActionRow key={child.id} a={child} isChild />
         ))}
       </>
     )
   }
 
-  const groups = groupByCompany
+  const groups = groupByAccount
     ? Object.entries(
-        roots.reduce((acc, p) => {
-          const key = p.recipient_company ?? 'Unknown'
-          acc[key] = [...(acc[key] ?? []), p]
+        roots.reduce((acc, a) => {
+          const key = a.account_name ?? 'Unknown'
+          acc[key] = [...(acc[key] ?? []), a]
           return acc
-        }, {} as Record<string, Proposal[]>)
-      )
-    : [['All Proposals', roots] as [string, Proposal[]]]
+        }, {} as Record<string, Action[]>)
+      ).sort(([ka], [kb]) => ka.localeCompare(kb))
+    : [['All Actions', roots] as [string, Action[]]]
 
   if (loading) {
     return (
@@ -273,15 +253,15 @@ export default function TimelinePage() {
           <p className="text-gray-500 text-sm mt-0.5">Looking back over the selected period · Today marked in blue</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Group toggle */}
+          {/* Group by Account toggle */}
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
             <div
-              className={cn('w-10 h-5 rounded-full transition-colors relative', groupByCompany ? 'bg-indigo-600' : 'bg-gray-300')}
-              onClick={() => setGroupByCompany(v => !v)}
+              className={cn('w-10 h-5 rounded-full transition-colors relative', groupByAccount ? 'bg-indigo-600' : 'bg-gray-300')}
+              onClick={() => setGroupByAccount(v => !v)}
             >
-              <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', groupByCompany ? 'translate-x-5' : 'translate-x-0.5')} />
+              <div className={cn('absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform', groupByAccount ? 'translate-x-5' : 'translate-x-0.5')} />
             </div>
-            Group by Company
+            Group by Account
           </label>
           {/* Zoom */}
           <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
@@ -300,23 +280,27 @@ export default function TimelinePage() {
 
       {/* Legend */}
       <div className="flex flex-wrap gap-4 text-xs text-gray-600 items-center">
-        <span className="font-medium text-gray-500 uppercase tracking-wide">Status:</span>
-        {(Object.keys(STATUS_BG) as ProposalStatus[]).map(s => (
-          <div key={s} className="flex items-center gap-1.5">
-            <div className={cn('w-3 h-3 rounded-sm', STATUS_BG[s])} />{s}
-          </div>
-        ))}
+        <span className="font-medium text-gray-500 uppercase tracking-wide">Owner:</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded-sm bg-indigo-500" /> Us (our team)
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 rounded-sm bg-orange-400" /> Client side
+        </div>
         <span className="ml-4 font-medium text-gray-500 uppercase tracking-wide">Markers:</span>
         <div className="flex items-center gap-1.5">
-          <div className="w-2 h-4 bg-orange-400 rounded-sm" /> Deadline
+          <div className="w-2 h-4 bg-orange-500 rounded-sm" /> Expected by (exact)
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-4 bg-orange-300 opacity-60 rounded-sm" /> Expected by (approx)
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-3 rounded-full border-2 border-white bg-white ring-2 ring-gray-700" /> Last action
         </div>
       </div>
 
-      {proposals.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">No proposals to display.</div>
+      {actions.length === 0 ? (
+        <div className="text-center py-20 text-gray-400">No actions to display.</div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {/* Month header */}
@@ -344,13 +328,13 @@ export default function TimelinePage() {
 
             {groups.map(([group, items]) => (
               <div key={group}>
-                {groupByCompany && (
+                {groupByAccount && (
                   <div className="sticky left-0 px-4 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b z-20">
                     {group}
                   </div>
                 )}
-                {(items as Proposal[]).map(p => (
-                  <ProposalRow key={p.id} p={p} isChild={false} />
+                {(items as Action[]).map(a => (
+                  <ActionRow key={a.id} a={a} isChild={false} />
                 ))}
               </div>
             ))}
@@ -358,30 +342,31 @@ export default function TimelinePage() {
             {/* Tooltip */}
             {tooltip && (
               <div
-                className="absolute z-30 bg-gray-900 text-white text-xs rounded-lg px-3 py-2.5 pointer-events-none shadow-xl w-64"
-                style={{ left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth ?? 600) - 270), top: tooltip.y }}
+                className="absolute z-30 bg-gray-900 text-white text-xs rounded-lg px-3 py-2.5 pointer-events-none shadow-xl w-72"
+                style={{ left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth ?? 600) - 290), top: tooltip.y }}
               >
-                <p className="font-semibold mb-1 leading-tight">{tooltip.proposal.proposal_title}</p>
-                <p className="text-gray-300">{tooltip.proposal.recipient_name} · {tooltip.proposal.recipient_company}</p>
-                {tooltip.proposal.summary && (
-                  <p className="text-gray-400 mt-1.5 line-clamp-2 leading-relaxed">{tooltip.proposal.summary}</p>
+                <p className="font-semibold mb-1 leading-tight">{tooltip.action.title}</p>
+                <p className="text-gray-300">{tooltip.action.contact_name} · {tooltip.action.account_name}</p>
+                {tooltip.action.summary && (
+                  <p className="text-gray-400 mt-1.5 line-clamp-2 leading-relaxed">{tooltip.action.summary}</p>
                 )}
                 <div className="mt-2 pt-2 border-t border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
-                  <span className="text-gray-400">Sent</span>
-                  <span>{formatDate(tooltip.proposal.proposal_date)}</span>
+                  <span className="text-gray-400">Owner</span>
+                  <span className={tooltip.action.owner === 'us' ? 'text-indigo-300' : 'text-orange-300'}>
+                    {tooltip.action.owner === 'us' ? 'Us' : 'Client'}
+                  </span>
+                  <span className="text-gray-400">Meeting</span>
+                  <span>{formatDate(tooltip.action.source_date)}</span>
                   <span className="text-gray-400">Last action</span>
-                  <span>{formatDate(tooltip.proposal.updated_at)}</span>
-                  {tooltip.proposal.deadline && <>
-                    <span className="text-gray-400">Deadline</span>
-                    <span className="text-orange-300">{formatDate(tooltip.proposal.deadline)}</span>
+                  <span>{formatDate(tooltip.action.updated_at)}</span>
+                  {tooltip.action.expected_by && <>
+                    <span className="text-gray-400">Expected by</span>
+                    <span className="text-orange-300">
+                      {formatDate(tooltip.action.expected_by)}{tooltip.action.expected_by_is_approximate ? ' ~' : ''}
+                    </span>
                   </>}
                   <span className="text-gray-400">Status</span>
-                  <span className={cn(
-                    tooltip.proposal.status === 'Open' ? 'text-blue-300' :
-                    tooltip.proposal.status === 'Followed Up' ? 'text-yellow-300' :
-                    tooltip.proposal.status === 'Responded' ? 'text-green-300' :
-                    tooltip.proposal.status === 'Stalled' ? 'text-red-300' : 'text-gray-300'
-                  )}>{tooltip.proposal.status}</span>
+                  <span>{tooltip.action.status}</span>
                 </div>
               </div>
             )}
@@ -392,7 +377,7 @@ export default function TimelinePage() {
       {selected && (
         <ProposalDrawer
           proposal={selected}
-          proposals={proposals}
+          proposals={actions}
           onClose={() => setSelected(null)}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}

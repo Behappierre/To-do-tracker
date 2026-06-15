@@ -15,10 +15,11 @@ export function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
-export function computeDaysLive(proposalDate: string | null | undefined): number {
-  if (!proposalDate) return 0
+// Days live is based on updated_at — reflects how long since the action was last touched.
+export function computeDaysLive(updatedAt: string | null | undefined): number {
+  if (!updatedAt) return 0
   try {
-    return differenceInDays(new Date(), parseISO(proposalDate))
+    return differenceInDays(new Date(), parseISO(updatedAt))
   } catch {
     return 0
   }

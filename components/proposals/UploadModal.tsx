@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useRef, DragEvent, ChangeEvent } from 'react'
-import { Upload, FileText, Loader2, ChevronDown, ChevronUp, CheckSquare, Square } from 'lucide-react'
+import { Upload, FileText, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, ClipboardPaste } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
-import { ExtractedProposal } from '@/types/proposal'
+import { ExtractedAction, ActionStatus, ActionOwner, StrategicWeight } from '@/types/proposal'
 import { cn } from '@/lib/utils'
 
 interface UploadModalProps {
@@ -18,36 +18,66 @@ interface UploadModalProps {
 }
 
 type Stage = 'drop' | 'reading' | 'extracting' | 'preview' | 'saving'
+type InputMode = 'pdf' | 'text'
 
-const STATUSES = ['Open', 'Followed Up', 'Responded', 'Closed', 'Stalled']
+const STATUSES: ActionStatus[]       = ['Open', 'Nudged', 'In Progress', 'Done', 'Stalled', 'Superseded']
+const WEIGHTS: StrategicWeight[]     = ['Low', 'Medium', 'Medium-High', 'High']
 
-type DraftProposal = ExtractedProposal & { status: string; notes: string }
+type DraftAction = ExtractedAction & { notes: string }
 
-function emptyDraft(): DraftProposal {
+function emptyDraft(): DraftAction {
   return {
-    proposal_title: null, sender_name: null, recipient_name: null,
-    recipient_company: null, proposal_date: null, summary: null,
-    call_to_action: null, deadline: null, status: 'Open', notes: '',
+    title: null, account_name: null, contact_name: null,
+    owner: 'them', source_date: null, expected_by: null,
+    expected_by_is_approximate: false, strategic_weight: null,
+    dependencies: null, summary: null, status: 'Open', notes: '',
   }
 }
 
 export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
-  const { toast } = useToast()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [stage, setStage] = useState<Stage>('drop')
+  const { toast }   = useToast()
+  const inputRef    = useRef<HTMLInputElement>(null)
+  const [mode, setMode]         = useState<InputMode>('pdf')
+  const [stage, setStage]       = useState<Stage>('drop')
   const [dragging, setDragging] = useState(false)
   const [filename, setFilename] = useState('')
-  const [pdfBase64, setPdfBase64] = useState('')
-  const [drafts, setDrafts] = useState<DraftProposal[]>([])
-  const [selected, setSelected] = useState<boolean[]>([])
-  const [expanded, setExpanded] = useState<boolean[]>([])
+  const [pdfBase64, setPdfBase64]   = useState('')
+  const [pasteText, setPasteText]   = useState('')
+  const [drafts, setDrafts]         = useState<DraftAction[]>([])
+  const [selected, setSelected]     = useState<boolean[]>([])
+  const [expanded, setExpanded]     = useState<boolean[]>([])
 
   const reset = () => {
-    setStage('drop'); setFilename(''); setPdfBase64('')
+    setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
     setDrafts([]); setSelected([]); setExpanded([])
   }
 
   const handleClose = () => { reset(); onClose() }
+
+  const runExtraction = async (fd: FormData, fname: string) => {
+    setFilename(fname)
+    setStage('extracting')
+    try {
+      const res  = await fetch('/api/upload', { method: 'POST', body: fd })
+      const json = await res.json()
+
+      if (!res.ok) {
+        toast(json.error || 'Extraction failed', 'error')
+        setStage('drop')
+        return
+      }
+
+      const extracted: ExtractedAction[] = json.proposals
+      const d = extracted.map((e) => ({ ...emptyDraft(), ...e }))
+      setDrafts(d)
+      setSelected(d.map(() => true))
+      setExpanded(d.map((_, i) => i === 0))
+      setStage('preview')
+    } catch {
+      toast('Upload failed. Please try again.', 'error')
+      setStage('drop')
+    }
+  }
 
   const processFile = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
@@ -58,33 +88,17 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
     reader.onload = (e) => setPdfBase64((e.target?.result as string).split(',')[1])
     reader.readAsDataURL(file)
 
-    setFilename(file.name)
     setStage('reading')
-
     const fd = new FormData()
     fd.append('pdf', file)
+    await runExtraction(fd, file.name)
+  }
 
-    try {
-      setStage('extracting')
-      const res = await fetch('/api/upload', { method: 'POST', body: fd })
-      const json = await res.json()
-
-      if (!res.ok) {
-        toast(json.error || 'Extraction failed', 'error')
-        setStage('drop')
-        return
-      }
-
-      const extracted: ExtractedProposal[] = json.proposals
-      const d = extracted.map((e) => ({ ...emptyDraft(), ...e }))
-      setDrafts(d)
-      setSelected(d.map(() => true))
-      setExpanded(d.map((_, i) => i === 0))
-      setStage('preview')
-    } catch {
-      toast('Upload failed. Please try again.', 'error')
-      setStage('drop')
-    }
+  const processText = async () => {
+    if (!pasteText.trim()) { toast('Paste your meeting summary first', 'error'); return }
+    const fd = new FormData()
+    fd.append('text', pasteText.trim())
+    await runExtraction(fd, 'meeting-summary')
   }
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -98,7 +112,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
     if (file) processFile(file)
   }
 
-  const updateDraft = (index: number, key: keyof DraftProposal, value: string) => {
+  const updateDraft = (index: number, key: keyof DraftAction, value: unknown) => {
     setDrafts((prev) => prev.map((d, i) => i === index ? { ...d, [key]: value } : d))
   }
 
@@ -110,29 +124,31 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
   const handleSave = async () => {
     const toSave = drafts.filter((_, i) => selected[i])
-    if (toSave.length === 0) { toast('Select at least one proposal to save', 'error'); return }
+    if (toSave.length === 0) { toast('Select at least one action to save', 'error'); return }
 
     setStage('saving')
     let savedCount = 0
     for (const draft of toSave) {
       try {
+        const body: Record<string, unknown> = { ...draft }
+        if (pdfBase64) { body.pdfBase64 = pdfBase64; body.pdf_filename = filename }
         const res = await fetch('/api/proposals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...draft, pdfBase64, pdf_filename: filename }),
+          body: JSON.stringify(body),
         })
         if (res.ok) savedCount++
         else {
           const j = await res.json()
-          toast(`Failed to save "${draft.proposal_title ?? 'proposal'}": ${j.error}`, 'error')
+          toast(`Failed to save "${draft.title ?? 'action'}": ${j.error}`, 'error')
         }
       } catch {
-        toast(`Network error saving "${draft.proposal_title ?? 'proposal'}"`, 'error')
+        toast(`Network error saving "${draft.title ?? 'action'}"`, 'error')
       }
     }
 
     if (savedCount > 0) {
-      toast(`${savedCount} proposal${savedCount !== 1 ? 's' : ''} saved`, 'success')
+      toast(`${savedCount} action${savedCount !== 1 ? 's' : ''} saved`, 'success')
       reset(); onClose(); onSaved()
     } else {
       setStage('preview')
@@ -143,12 +159,31 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const stageLabel: Partial<Record<Stage, string>> = {
     reading: 'Reading PDF…', extracting: 'Extracting with AI…', saving: 'Saving…',
   }
+  const isProcessing = stage === 'reading' || stage === 'extracting'
 
   return (
-    <Modal open={open} onClose={handleClose} title="Upload Proposal" className="max-w-2xl mx-4">
+    <Modal open={open} onClose={handleClose} title="Import Meeting Summary" className="max-w-2xl mx-4">
       <div className="p-6">
-        {/* Drop zone */}
-        {(stage === 'drop' || stage === 'reading' || stage === 'extracting') && (
+        {/* Input mode tabs (only shown before extraction) */}
+        {(stage === 'drop' || isProcessing) && (
+          <div className="flex rounded-lg border border-gray-200 p-1 gap-1 mb-4">
+            <button
+              onClick={() => setMode('pdf')}
+              className={cn('flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors', mode === 'pdf' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}
+            >
+              <Upload className="w-4 h-4" /> PDF Upload
+            </button>
+            <button
+              onClick={() => setMode('text')}
+              className={cn('flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors', mode === 'text' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}
+            >
+              <ClipboardPaste className="w-4 h-4" /> Paste Text
+            </button>
+          </div>
+        )}
+
+        {/* PDF drop zone */}
+        {(stage === 'drop' || isProcessing) && mode === 'pdf' && (
           <div
             className={cn(
               'border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors',
@@ -164,7 +199,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
               <>
                 <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" />
                 <p className="text-gray-600 font-medium">Drop a PDF here or click to browse</p>
-                <p className="text-sm text-gray-400 mt-1">PDF files only · Multiple emails in one PDF are supported</p>
+                <p className="text-sm text-gray-400 mt-1">PDF files only</p>
               </>
             ) : (
               <div className="flex flex-col items-center gap-3">
@@ -176,7 +211,31 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
           </div>
         )}
 
-        {/* Multi-proposal preview */}
+        {/* Text paste zone */}
+        {(stage === 'drop' || isProcessing) && mode === 'text' && (
+          <div className="space-y-3">
+            <Textarea
+              rows={12}
+              placeholder="Paste your meeting summary here (Meeting Context, Substantive Summary, Actions and Next Steps…)"
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              disabled={isProcessing}
+              className="font-mono text-xs"
+            />
+            {isProcessing ? (
+              <div className="flex items-center justify-center gap-3 py-4">
+                <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                <p className="text-gray-600 font-medium">{stageLabel[stage]}</p>
+              </div>
+            ) : (
+              <Button onClick={processText} className="w-full" disabled={!pasteText.trim()}>
+                Extract Actions with AI
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Multi-action preview */}
         {stage === 'preview' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -185,12 +244,12 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                 <span className="truncate">{filename}</span>
               </div>
               <span className="text-sm font-medium text-indigo-600 shrink-0">
-                {drafts.length} email{drafts.length !== 1 ? 's' : ''} found
+                {drafts.length} action{drafts.length !== 1 ? 's' : ''} found
               </span>
             </div>
 
             <p className="text-sm text-gray-500">
-              Review and edit each extracted proposal. Uncheck any you don&apos;t want to save.
+              Review and edit each extracted action. Uncheck any you don&apos;t want to save.
             </p>
 
             <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
@@ -202,7 +261,6 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                     selected[i] ? 'border-indigo-200 bg-white' : 'border-gray-200 bg-gray-50 opacity-60'
                   )}
                 >
-                  {/* Accordion header */}
                   <div className="flex items-center gap-3 px-4 py-3">
                     <button
                       onClick={() => toggleSelect(i)}
@@ -215,59 +273,75 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                     </button>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 text-sm truncate">
-                        {draft.proposal_title ?? `Proposal ${i + 1}`}
+                        {draft.title ?? `Action ${i + 1}`}
                       </p>
                       <p className="text-xs text-gray-500 truncate">
-                        {[draft.recipient_name, draft.recipient_company].filter(Boolean).join(' · ') || 'Unknown recipient'}
+                        {[draft.contact_name, draft.account_name].filter(Boolean).join(' · ') || 'Unknown contact'}
+                        {draft.owner === 'us'
+                          ? ' · 🔵 Us'
+                          : ' · 🟠 Client'}
                       </p>
                     </div>
-                    <button
-                      onClick={() => toggleExpand(i)}
-                      className="text-gray-400 hover:text-gray-600 shrink-0"
-                    >
+                    <button onClick={() => toggleExpand(i)} className="text-gray-400 hover:text-gray-600 shrink-0">
                       {expanded[i] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                   </div>
 
-                  {/* Expanded edit form */}
                   {expanded[i] && (
                     <div className="px-4 pb-4 space-y-3 border-t pt-3">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <Field label="Title">
-                          <Input value={draft.proposal_title ?? ''} onChange={(e) => updateDraft(i, 'proposal_title', e.target.value)} />
+                          <Input value={draft.title ?? ''} onChange={(e) => updateDraft(i, 'title', e.target.value)} />
                         </Field>
-                        <Field label="Sender Name">
-                          <Input value={draft.sender_name ?? ''} onChange={(e) => updateDraft(i, 'sender_name', e.target.value)} />
+                        <Field label="Account">
+                          <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />
                         </Field>
-                        <Field label="Recipient Name">
-                          <Input value={draft.recipient_name ?? ''} onChange={(e) => updateDraft(i, 'recipient_name', e.target.value)} />
+                        <Field label="Contact Name">
+                          <Input value={draft.contact_name ?? ''} onChange={(e) => updateDraft(i, 'contact_name', e.target.value)} />
                         </Field>
-                        <Field label="Company">
-                          <Input value={draft.recipient_company ?? ''} onChange={(e) => updateDraft(i, 'recipient_company', e.target.value)} />
+                        <Field label="Owner">
+                          <Select value={draft.owner} onChange={(e) => updateDraft(i, 'owner', e.target.value as ActionOwner)}>
+                            <option value="us">Us (our team)</option>
+                            <option value="them">Them (client)</option>
+                          </Select>
                         </Field>
-                        <Field label="Proposal Date">
-                          <Input type="date" value={draft.proposal_date ?? ''} onChange={(e) => updateDraft(i, 'proposal_date', e.target.value)} />
+                        <Field label="Meeting Date">
+                          <Input type="date" value={draft.source_date ?? ''} onChange={(e) => updateDraft(i, 'source_date', e.target.value)} />
                         </Field>
-                        <Field label="Deadline">
-                          <Input type="date" value={draft.deadline ?? ''} onChange={(e) => updateDraft(i, 'deadline', e.target.value)} />
+                        <Field label="Expected By">
+                          <Input type="date" value={draft.expected_by ?? ''} onChange={(e) => updateDraft(i, 'expected_by', e.target.value)} />
                         </Field>
-                      </div>
-                      <Field label="Summary">
-                        <Textarea rows={2} value={draft.summary ?? ''} onChange={(e) => updateDraft(i, 'summary', e.target.value)} />
-                      </Field>
-                      <Field label="Call to Action">
-                        <Textarea rows={2} value={draft.call_to_action ?? ''} onChange={(e) => updateDraft(i, 'call_to_action', e.target.value)} />
-                      </Field>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Field label="Strategic Weight">
+                          <Select value={draft.strategic_weight ?? ''} onChange={(e) => updateDraft(i, 'strategic_weight', e.target.value as StrategicWeight || null)}>
+                            <option value="">— Not set —</option>
+                            {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+                          </Select>
+                        </Field>
                         <Field label="Status">
-                          <Select value={draft.status} onChange={(e) => updateDraft(i, 'status', e.target.value)}>
+                          <Select value={draft.status} onChange={(e) => updateDraft(i, 'status', e.target.value as ActionStatus)}>
                             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                           </Select>
                         </Field>
-                        <Field label="Notes">
-                          <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
-                        </Field>
                       </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="checkbox"
+                          id={`approx-${i}`}
+                          checked={draft.expected_by_is_approximate}
+                          onChange={(e) => updateDraft(i, 'expected_by_is_approximate', e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                        />
+                        <label htmlFor={`approx-${i}`} className="text-xs text-gray-500">Expected by date is approximate</label>
+                      </div>
+                      <Field label="Dependencies">
+                        <Input value={draft.dependencies ?? ''} onChange={(e) => updateDraft(i, 'dependencies', e.target.value)} />
+                      </Field>
+                      <Field label="Context / Summary">
+                        <Textarea rows={2} value={draft.summary ?? ''} onChange={(e) => updateDraft(i, 'summary', e.target.value)} />
+                      </Field>
+                      <Field label="Notes">
+                        <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
+                      </Field>
                     </div>
                   )}
                 </div>
@@ -281,7 +355,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
               <div className="flex gap-3">
                 <Button variant="secondary" onClick={handleClose}>Cancel</Button>
                 <Button onClick={handleSave} disabled={selectedCount === 0}>
-                  Save {selectedCount > 1 ? `${selectedCount} Proposals` : 'Proposal'}
+                  Save {selectedCount > 1 ? `${selectedCount} Actions` : 'Action'}
                 </Button>
               </div>
             </div>
