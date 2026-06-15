@@ -16,6 +16,7 @@ export interface Action {
   strategic_weight: StrategicWeight | null
   dependencies: string | null
   parallel_route: string | null
+  theme: string | null
   summary: string | null
   notes: string | null
   pdf_url: string | null
