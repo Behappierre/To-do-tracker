@@ -11,7 +11,7 @@ The dashboard shows you where the bottlenecks are. The timeline makes it visuall
 - **Next.js 14** (App Router, TypeScript)
 - **Tailwind CSS** — utility-first styling
 - **Supabase** — Postgres database + file storage
-- **Anthropic Claude API** — meeting summary extraction (`claude-sonnet-4-20250514`)
+- **Anthropic Claude API** — meeting summary extraction (`claude-sonnet-4-6`)
 - **pdf-parse** — server-side PDF text extraction
 
 ---
