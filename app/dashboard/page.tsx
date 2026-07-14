@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Plus, Search, FileText, Clock, AlertTriangle, Users,
   ChevronRight, ChevronDown, LayoutList, List, AlertCircle,
+  Download, Copy, Check,
 } from 'lucide-react'
 import { Action, ActionStatus, StrategicWeight } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { StatusBadge } from '@/components/ui/badge'
 import { UploadModal } from '@/components/proposals/UploadModal'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
 import { formatDate, daysLiveColor, cn } from '@/lib/utils'
+import { downloadCsv, copyActionsAsText } from '@/lib/export'
 import { differenceInDays, parseISO, compareAsc } from 'date-fns'
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -120,6 +122,9 @@ export default function DashboardPage() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selected, setSelected]     = useState<Action | null>(null)
 
+  // export
+  const [copied, setCopied] = useState(false)
+
   const fetchActions = useCallback(async () => {
     setLoading(true)
     setFetchError(null)
@@ -155,6 +160,15 @@ export default function DashboardPage() {
   ).length
   const avgDaysLive = actions.length
     ? Math.round(actions.reduce((s, a) => s + (a.days_live ?? 0), 0) / actions.length) : 0
+
+  const openActions = actions.filter(a => ACTIVE_STATUSES.has(a.status))
+
+  const handleExportCsv = () => downloadCsv(openActions)
+  const handleCopyText = async () => {
+    await copyActionsAsText(openActions)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   const handleUpdated = (updated: Action) => {
     setActions(prev => prev.map(a => a.id === updated.id ? updated : a))
@@ -331,10 +345,20 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-gray-900">BD Actions</h1>
           <p className="text-gray-500 text-sm mt-0.5">{actions.length} action{actions.length !== 1 ? 's' : ''} tracked</p>
         </div>
-        <Button onClick={() => setUploadOpen(true)}>
-          <Plus className="w-4 h-4" />
-          Import Meeting Summary
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={handleCopyText} disabled={openActions.length === 0}>
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            {copied ? 'Copied' : 'Copy Open Actions'}
+          </Button>
+          <Button variant="secondary" onClick={handleExportCsv} disabled={openActions.length === 0}>
+            <Download className="w-4 h-4" />
+            Export CSV
+          </Button>
+          <Button onClick={() => setUploadOpen(true)}>
+            <Plus className="w-4 h-4" />
+            Import Meeting Summary
+          </Button>
+        </div>
       </div>
 
       {/* KPI Row */}
