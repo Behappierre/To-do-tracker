@@ -28,9 +28,11 @@ export function actionsToCsv(actions: Action[]): string {
   return [header, ...rows].join('\n')
 }
 
+const UTF8_BOM = '﻿'
+
 export function downloadCsv(actions: Action[], filename = 'open-actions.csv') {
   const csv = actionsToCsv(actions)
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob([UTF8_BOM + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
