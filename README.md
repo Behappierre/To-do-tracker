@@ -37,8 +37,10 @@ cp .env.local.example .env.local
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Project Settings → API → Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Project Settings → API → anon public key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Project Settings → API → service_role key |
+| `SUPABASE_SECRET_KEY` | Supabase dashboard → Project Settings → API Keys → secret key (server only) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Legacy alternative to `SUPABASE_SECRET_KEY` (server only) |
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys |
+| `STAKEHOLDER_DUPLICATE_RESOLUTION_ENABLED` | Keep `false` during data validation; set to `true` only after review approval |
 
 ### 3. Set up Supabase
 
