@@ -41,6 +41,7 @@ cp .env.local.example .env.local
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy alternative to `SUPABASE_SECRET_KEY` (server only) |
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys |
 | `STAKEHOLDER_DUPLICATE_RESOLUTION_ENABLED` | Keep `false` during data validation; set to `true` only after review approval |
+| `STAKEHOLDER_APP_URL` | Separate StakeMap deployment embedded in the authenticated stakeholder workspace |
 
 ### 3. Set up Supabase
 
@@ -144,6 +145,17 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 - Zoom: 1 month, 3 months, 6 months, 1 year
 - Hover tooltip with contact, summary, owner, and dates
 - Click any bar or label to open the detail drawer
+
+### Stakeholder workspace (`/dashboard/stakeholders`)
+
+- Keeps StakeMap deployed as a separate application
+- Displays its stakeholder register inside the authenticated To-do Tracker shell
+- Offers an explicit link to open StakeMap in its own tab
+- Uses `STAKEHOLDER_APP_URL` so preview and production deployments can point at
+  different StakeMap environments
+- Does not provide cross-domain single sign-on; StakeMap must use the shared
+  Supabase project and authentication before the iframe can become a unified
+  secured experience
 
 ### Import Flow
 

@@ -2,7 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BarChart3, LayoutDashboard, LogOut, UserRoundCheck } from 'lucide-react'
+import {
+  BarChart3,
+  LayoutDashboard,
+  LogOut,
+  UserRoundCheck,
+  UsersRound,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { useEffect, useState } from 'react'
@@ -10,6 +16,7 @@ import { useEffect, useState } from 'react'
 const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/timeline', label: 'Timeline', icon: BarChart3 },
+  { href: '/dashboard/stakeholders', label: 'Stakeholders', icon: UsersRound },
   { href: '/dashboard/stakeholder-review', label: 'Data review', icon: UserRoundCheck },
 ]
 
