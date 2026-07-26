@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Building2, Check, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
+import { Building2, Check, GitCompareArrows, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
+import Link from 'next/link'
 import { Action, EntityOptions } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -209,15 +210,24 @@ export default function ActionLinkReviewPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2">
-          <Link2 className="w-6 h-6 text-indigo-600" />
-          <h1 className="text-2xl font-bold text-gray-900">Action link review</h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Link2 className="w-6 h-6 text-indigo-600" />
+            <h1 className="text-2xl font-bold text-gray-900">Action link review</h1>
+          </div>
+          <p className="text-sm text-gray-500 mt-1 max-w-3xl">
+            Confirm canonical StakeMap links or explicitly record that no suitable match exists.
+            Suggestions never save automatically.
+          </p>
         </div>
-        <p className="text-sm text-gray-500 mt-1 max-w-3xl">
-          Confirm canonical StakeMap links or explicitly record that no suitable match exists.
-          Suggestions never save automatically.
-        </p>
+        <Link
+          href="/dashboard/action-review/compare"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+        >
+          <GitCompareArrows className="h-4 w-4" />
+          Compare decisions
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
