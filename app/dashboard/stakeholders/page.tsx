@@ -40,7 +40,7 @@ function getStakeholderAppUrl() {
 function getStakeholderDataMode(): StakeholderDataMode {
   if (process.env.STAKEHOLDER_DATA_MODE === 'shared') return 'shared'
   if (process.env.STAKEHOLDER_DATA_MODE === 'legacy') return 'legacy'
-  return process.env.VERCEL_ENV === 'preview' ? 'shared' : 'legacy'
+  return 'shared'
 }
 
 export default async function StakeholderWorkspacePage() {
@@ -83,7 +83,7 @@ export default async function StakeholderWorkspacePage() {
           >
             <Database className="h-3.5 w-3.5" />
             {usesSharedData
-              ? 'Shared workspace data: this StakeMap preview uses the To-do Tracker Supabase project.'
+              ? 'Shared workspace data: StakeMap uses the migrated To-do Tracker stakeholder register.'
               : "Legacy data mode: this StakeMap deployment still uses its original Supabase project."}
           </p>
         </div>

@@ -155,9 +155,11 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 - Uses `STAKEHOLDER_APP_URL` so preview and production deployments can point at
   different StakeMap environments
 - Uses `STAKEHOLDER_DATA_MODE` to show whether the embedded deployment reads the
-  shared workspace or the original StakeMap database
+  shared workspace or the original StakeMap database; the standard deployment
+  defaults to `shared`, while an explicitly configured legacy URL can override
+  it with `legacy`
 - Defaults Vercel preview deployments to the Netlify StakeMap deploy preview
-  and keeps production on production StakeMap until the cutover is approved
+  and production deployments to the production StakeMap application
 - Does not provide cross-domain single sign-on; StakeMap must use the shared
   Supabase project and authentication before the iframe can become a unified
   secured experience
