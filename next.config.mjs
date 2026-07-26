@@ -1,7 +1,12 @@
+const defaultStakeholderAppUrl =
+  process.env.VERCEL_ENV === 'preview'
+    ? 'https://deploy-preview-1--stakemapper.netlify.app'
+    : 'https://stakemapper.netlify.app'
+
 const stakeholderAppOrigin = (() => {
   try {
     const url = new URL(
-      process.env.STAKEHOLDER_APP_URL || 'https://stakemapper.netlify.app'
+      process.env.STAKEHOLDER_APP_URL || defaultStakeholderAppUrl
     )
     const isLocalDevelopment =
       url.protocol === 'http:' &&

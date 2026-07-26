@@ -42,6 +42,7 @@ cp .env.local.example .env.local
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys |
 | `STAKEHOLDER_DUPLICATE_RESOLUTION_ENABLED` | Keep `false` during data validation; set to `true` only after review approval |
 | `STAKEHOLDER_APP_URL` | Separate StakeMap deployment embedded in the authenticated stakeholder workspace |
+| `STAKEHOLDER_DATA_MODE` | `shared` only when the configured StakeMap deployment uses the shared To-do Tracker Supabase project; otherwise `legacy` |
 
 ### 3. Set up Supabase
 
@@ -153,6 +154,10 @@ Open [http://localhost:3000](http://localhost:3000) — you'll be redirected to 
 - Offers an explicit link to open StakeMap in its own tab
 - Uses `STAKEHOLDER_APP_URL` so preview and production deployments can point at
   different StakeMap environments
+- Uses `STAKEHOLDER_DATA_MODE` to show whether the embedded deployment reads the
+  shared workspace or the original StakeMap database
+- Defaults Vercel preview deployments to the Netlify StakeMap deploy preview
+  and keeps production on production StakeMap until the cutover is approved
 - Does not provide cross-domain single sign-on; StakeMap must use the shared
   Supabase project and authentication before the iframe can become a unified
   secured experience

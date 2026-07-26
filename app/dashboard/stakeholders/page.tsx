@@ -1,10 +1,18 @@
-import { ExternalLink, ShieldCheck } from 'lucide-react'
+import { Database, ExternalLink, ShieldCheck } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import { getAuthClient } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 
-const DEFAULT_STAKEHOLDER_APP_URL = 'https://stakemapper.netlify.app'
+const PRODUCTION_STAKEHOLDER_APP_URL = 'https://stakemapper.netlify.app'
+const PREVIEW_STAKEHOLDER_APP_URL =
+  'https://deploy-preview-1--stakemapper.netlify.app'
+const DEFAULT_STAKEHOLDER_APP_URL =
+  process.env.VERCEL_ENV === 'preview'
+    ? PREVIEW_STAKEHOLDER_APP_URL
+    : PRODUCTION_STAKEHOLDER_APP_URL
+
+type StakeholderDataMode = 'legacy' | 'shared'
 
 function getStakeholderAppUrl() {
   const configuredUrl =
@@ -29,6 +37,12 @@ function getStakeholderAppUrl() {
   }
 }
 
+function getStakeholderDataMode(): StakeholderDataMode {
+  if (process.env.STAKEHOLDER_DATA_MODE === 'shared') return 'shared'
+  if (process.env.STAKEHOLDER_DATA_MODE === 'legacy') return 'legacy'
+  return process.env.VERCEL_ENV === 'preview' ? 'shared' : 'legacy'
+}
+
 export default async function StakeholderWorkspacePage() {
   const supabase = getAuthClient()
   const {
@@ -39,6 +53,8 @@ export default async function StakeholderWorkspacePage() {
   if (error || !user) redirect('/login')
 
   const stakeholderAppUrl = getStakeholderAppUrl()
+  const stakeholderDataMode = getStakeholderDataMode()
+  const usesSharedData = stakeholderDataMode === 'shared'
 
   return (
     <div className="space-y-4">
@@ -55,12 +71,20 @@ export default async function StakeholderWorkspacePage() {
           </div>
           <p className="mt-1 max-w-3xl text-sm text-gray-600">
             StakeMap remains a separate application and is displayed here as a
-            connected workspace. Its data and sign-in boundary remain separate
-            until the shared-data cutover is complete.
+            connected workspace. Sign-in remains a separate browser session
+            because the applications are hosted on different domains.
           </p>
-          <p className="mt-2 inline-flex rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800">
-            Data sync pending: this embedded view still uses StakeMap&apos;s
-            original Supabase project.
+          <p
+            className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium ${
+              usesSharedData
+                ? 'bg-emerald-50 text-emerald-800'
+                : 'bg-amber-50 text-amber-800'
+            }`}
+          >
+            <Database className="h-3.5 w-3.5" />
+            {usesSharedData
+              ? 'Shared workspace data: this StakeMap preview uses the To-do Tracker Supabase project.'
+              : "Legacy data mode: this StakeMap deployment still uses its original Supabase project."}
           </p>
         </div>
 
