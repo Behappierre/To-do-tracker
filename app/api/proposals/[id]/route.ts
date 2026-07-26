@@ -37,6 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       'title', 'account_name', 'contact_name', 'source_date', 'summary',
       'owner', 'strategic_weight', 'dependencies', 'parallel_route', 'parent_id',
       'company_id', 'primary_stakeholder_id',
+      'company_link_status', 'stakeholder_link_status',
     ]
 
     const updates: Record<string, unknown> = {}

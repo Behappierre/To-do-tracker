@@ -1,6 +1,7 @@
 export type ActionStatus = 'Open' | 'Nudged' | 'In Progress' | 'Done' | 'Stalled' | 'Superseded'
 export type ActionOwner = 'us' | 'them'
 export type StrategicWeight = 'Low' | 'Medium' | 'Medium-High' | 'High'
+export type LinkReviewStatus = 'pending' | 'linked' | 'no_match'
 
 export interface Action {
   id: string
@@ -12,6 +13,10 @@ export interface Action {
   external_owner_stakeholder_id: string | null
   created_by: string | null
   archived_at: string | null
+  company_link_status: LinkReviewStatus
+  stakeholder_link_status: LinkReviewStatus
+  link_reviewed_at: string | null
+  link_reviewed_by: string | null
   title: string | null
   account_name: string | null
   contact_name: string | null

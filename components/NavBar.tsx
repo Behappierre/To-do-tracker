@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   BarChart3,
   LayoutDashboard,
+  Link2,
   LogOut,
   UserRoundCheck,
   UsersRound,
@@ -17,6 +18,7 @@ const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/timeline', label: 'Timeline', icon: BarChart3 },
   { href: '/dashboard/stakeholders', label: 'Stakeholders', icon: UsersRound },
+  { href: '/dashboard/action-review', label: 'Action review', icon: Link2 },
   { href: '/dashboard/stakeholder-review', label: 'Data review', icon: UserRoundCheck },
 ]
 
