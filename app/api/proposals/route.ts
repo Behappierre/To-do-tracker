@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthClient } from '@/lib/supabase-server'
 import { getServiceClient } from '@/lib/supabase'
 import { computeDaysLive } from '@/lib/utils'
+import { getBusinessDevelopmentWorkspaceId } from '@/lib/workspace'
+
+const ACTION_SELECT = `
+  *,
+  company:companies!proposals_company_fk(name),
+  primary_stakeholder:stakeholders!proposals_primary_stakeholder_fk(full_name)
+`
+
+function formatAction(row: Record<string, unknown>) {
+  const company = row.company as { name?: string } | null
+  const stakeholder = row.primary_stakeholder as { full_name?: string } | null
+
+  return {
+    ...row,
+    company: undefined,
+    primary_stakeholder: undefined,
+    company_name: company?.name ?? null,
+    stakeholder_name: stakeholder?.full_name ?? null,
+    days_live: computeDaysLive(row.updated_at as string | null),
+  }
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,6 +35,7 @@ export async function GET(req: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
+    const workspaceId = await getBusinessDevelopmentWorkspaceId(supabase)
 
     const { searchParams } = new URL(req.url)
     const account = searchParams.get('account')
@@ -24,7 +46,9 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from('proposals')
-      .select('*')
+      .select(ACTION_SELECT)
+      .eq('workspace_id', workspaceId)
+      .is('archived_at', null)
       .order('created_at', { ascending: false })
 
     if (account) query = query.ilike('account_name', `%${account}%`)
@@ -44,10 +68,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const actions = (data || []).map((p) => ({
-      ...p,
-      days_live: computeDaysLive(p.updated_at),
-    }))
+    const actions = (data || []).map((p) => formatAction(p))
 
     return NextResponse.json(actions)
   } catch (err) {
@@ -63,6 +84,7 @@ export async function POST(req: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
+    const workspaceId = await getBusinessDevelopmentWorkspaceId(supabase)
 
     const serviceClient = getServiceClient()
     const body = await req.json()
@@ -84,24 +106,41 @@ export async function POST(req: NextRequest) {
       pdf_url = urlData.publicUrl
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { pdfBase64, ...actionData } = body
+    const allowed = [
+      'title', 'account_name', 'contact_name', 'owner', 'source_date',
+      'expected_by', 'expected_by_is_approximate', 'status',
+      'strategic_weight', 'dependencies', 'parallel_route', 'theme',
+      'summary', 'notes', 'pdf_filename', 'parent_id', 'company_id',
+      'primary_stakeholder_id',
+    ]
+    const actionData: Record<string, unknown> = {}
+    for (const key of allowed) {
+      if (key in body) actionData[key] = body[key]
+    }
+
+    const owner = body.owner === 'us' ? 'us' : 'them'
+    const primaryStakeholderId = body.primary_stakeholder_id || null
 
     const { data, error } = await supabase
       .from('proposals')
       .insert({
         ...actionData,
+        workspace_id: workspaceId,
         pdf_url,
         user_id: user.id,
+        created_by: user.id,
+        assigned_user_id: owner === 'us' ? user.id : null,
+        external_owner_stakeholder_id:
+          owner === 'them' ? primaryStakeholderId : null,
       })
-      .select()
+      .select(ACTION_SELECT)
       .single()
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ ...data, days_live: computeDaysLive(data.updated_at) })
+    return NextResponse.json(formatAction(data))
   } catch (err) {
     console.error('POST /api/proposals error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
