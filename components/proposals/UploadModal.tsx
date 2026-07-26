@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, DragEvent, ChangeEvent } from 'react'
+import { useState, useRef, useEffect, DragEvent, ChangeEvent } from 'react'
 import { Upload, FileText, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, ClipboardPaste } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,13 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
-import { ExtractedAction, ActionStatus, ActionOwner, StrategicWeight } from '@/types/proposal'
+import {
+  ExtractedAction,
+  ActionStatus,
+  ActionOwner,
+  StrategicWeight,
+  EntityOptions,
+} from '@/types/proposal'
 import { cn } from '@/lib/utils'
 
 interface UploadModalProps {
@@ -23,7 +29,11 @@ type InputMode = 'pdf' | 'text'
 const STATUSES: ActionStatus[]       = ['Open', 'Nudged', 'In Progress', 'Done', 'Stalled', 'Superseded']
 const WEIGHTS: StrategicWeight[]     = ['Low', 'Medium', 'Medium-High', 'High']
 
-type DraftAction = ExtractedAction & { notes: string }
+type DraftAction = ExtractedAction & {
+  notes: string
+  company_id: string | null
+  primary_stakeholder_id: string | null
+}
 
 function emptyDraft(): DraftAction {
   return {
@@ -31,6 +41,7 @@ function emptyDraft(): DraftAction {
     owner: 'them', source_date: null, expected_by: null,
     expected_by_is_approximate: false, strategic_weight: null,
     dependencies: null, summary: null, status: 'Open', notes: '',
+    company_id: null, primary_stakeholder_id: null,
   }
 }
 
@@ -46,6 +57,19 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const [drafts, setDrafts]         = useState<DraftAction[]>([])
   const [selected, setSelected]     = useState<boolean[]>([])
   const [expanded, setExpanded]     = useState<boolean[]>([])
+  const [entities, setEntities]     = useState<EntityOptions>({ companies: [], stakeholders: [] })
+
+  useEffect(() => {
+    if (!open || entities.companies.length > 0) return
+
+    fetch('/api/entity-options')
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Could not load companies and stakeholders')
+        return res.json()
+      })
+      .then(setEntities)
+      .catch(() => toast('Company and stakeholder links are temporarily unavailable', 'error'))
+  }, [open, entities.companies.length, toast])
 
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
@@ -114,6 +138,36 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
   const updateDraft = (index: number, key: keyof DraftAction, value: unknown) => {
     setDrafts((prev) => prev.map((d, i) => i === index ? { ...d, [key]: value } : d))
+  }
+
+  const selectCompany = (index: number, companyId: string) => {
+    const company = entities.companies.find((option) => option.id === companyId)
+    setDrafts((prev) => prev.map((draft, i) => i === index ? {
+      ...draft,
+      company_id: companyId || null,
+      account_name: company?.name ?? draft.account_name,
+      primary_stakeholder_id:
+        entities.stakeholders.some((stakeholder) =>
+          stakeholder.id === draft.primary_stakeholder_id &&
+          stakeholder.company_id === companyId
+        )
+          ? draft.primary_stakeholder_id
+          : null,
+    } : draft))
+  }
+
+  const selectStakeholder = (index: number, stakeholderId: string) => {
+    const stakeholder = entities.stakeholders.find((option) => option.id === stakeholderId)
+    const company = stakeholder
+      ? entities.companies.find((option) => option.id === stakeholder.company_id)
+      : null
+    setDrafts((prev) => prev.map((draft, i) => i === index ? {
+      ...draft,
+      primary_stakeholder_id: stakeholderId || null,
+      contact_name: stakeholder?.full_name ?? draft.contact_name,
+      company_id: stakeholder?.company_id ?? draft.company_id,
+      account_name: company?.name ?? draft.account_name,
+    } : draft))
   }
 
   const toggleSelect = (i: number) =>
@@ -292,6 +346,31 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <Field label="Title">
                           <Input value={draft.title ?? ''} onChange={(e) => updateDraft(i, 'title', e.target.value)} />
+                        </Field>
+                        <Field label="Linked Company">
+                          <Select value={draft.company_id ?? ''} onChange={(e) => selectCompany(i, e.target.value)}>
+                            <option value="">— Not linked —</option>
+                            {entities.companies.map((company) => (
+                              <option key={company.id} value={company.id}>{company.name}</option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Field label="Linked Stakeholder">
+                          <Select
+                            value={draft.primary_stakeholder_id ?? ''}
+                            onChange={(e) => selectStakeholder(i, e.target.value)}
+                          >
+                            <option value="">— Not linked —</option>
+                            {entities.stakeholders
+                              .filter((stakeholder) =>
+                                !draft.company_id || stakeholder.company_id === draft.company_id
+                              )
+                              .map((stakeholder) => (
+                                <option key={stakeholder.id} value={stakeholder.id}>
+                                  {stakeholder.full_name}{stakeholder.title ? ` — ${stakeholder.title}` : ''}
+                                </option>
+                              ))}
+                          </Select>
                         </Field>
                         <Field label="Account">
                           <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />

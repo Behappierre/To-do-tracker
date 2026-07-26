@@ -2,7 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BarChart3, LayoutDashboard, LogOut } from 'lucide-react'
+import {
+  BarChart3,
+  LayoutDashboard,
+  Link2,
+  LogOut,
+  UserRoundCheck,
+  UsersRound,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { useEffect, useState } from 'react'
@@ -10,6 +17,9 @@ import { useEffect, useState } from 'react'
 const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/timeline', label: 'Timeline', icon: BarChart3 },
+  { href: '/dashboard/stakeholders', label: 'Stakeholders', icon: UsersRound },
+  { href: '/dashboard/action-review', label: 'Action review', icon: Link2 },
+  { href: '/dashboard/stakeholder-review', label: 'Data review', icon: UserRoundCheck },
 ]
 
 export function NavBar() {
@@ -47,7 +57,7 @@ export function NavBar() {
               href={href}
               className={cn(
                 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                pathname === href
+                pathname === href || (href !== '/dashboard' && pathname.startsWith(`${href}/`))
                   ? 'bg-indigo-50 text-indigo-700'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               )}

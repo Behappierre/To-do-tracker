@@ -2,7 +2,13 @@
 
 import { useState, useEffect, ReactNode } from 'react'
 import { X, ExternalLink, Trash2, Calendar, Building2, User, Bell } from 'lucide-react'
-import { Action, ActionStatus, ActionOwner, StrategicWeight } from '@/types/proposal'
+import {
+  Action,
+  ActionStatus,
+  ActionOwner,
+  StrategicWeight,
+  EntityOptions,
+} from '@/types/proposal'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,6 +39,9 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
   const [dependencies, setDependencies]         = useState('')
   const [parallelRoute, setParallelRoute]       = useState('')
   const [parentId, setParentId]                 = useState<string>('')
+  const [companyId, setCompanyId]               = useState('')
+  const [stakeholderId, setStakeholderId]       = useState('')
+  const [entities, setEntities]                 = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [saving, setSaving]                     = useState(false)
   const [confirmDelete, setConfirmDelete]       = useState(false)
 
@@ -47,9 +56,23 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       setDependencies(proposal.dependencies ?? '')
       setParallelRoute(proposal.parallel_route ?? '')
       setParentId(proposal.parent_id ?? '')
+      setCompanyId(proposal.company_id ?? '')
+      setStakeholderId(proposal.primary_stakeholder_id ?? '')
       setConfirmDelete(false)
     }
   }, [proposal])
+
+  useEffect(() => {
+    if (!proposal || entities.companies.length > 0) return
+
+    fetch('/api/entity-options')
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Could not load companies and stakeholders')
+        return res.json()
+      })
+      .then(setEntities)
+      .catch(() => toast('Company and stakeholder links are temporarily unavailable', 'error'))
+  }, [proposal, entities.companies.length, toast])
 
   if (!proposal) return null
 
@@ -75,6 +98,8 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
   }
 
   const handleSave = async () => {
+    const company = entities.companies.find((option) => option.id === companyId)
+    const stakeholder = entities.stakeholders.find((option) => option.id === stakeholderId)
     const json = await patch({
       status,
       owner,
@@ -85,6 +110,10 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       dependencies: dependencies || null,
       parallel_route: parallelRoute || null,
       parent_id: parentId || null,
+      company_id: companyId || null,
+      primary_stakeholder_id: stakeholderId || null,
+      account_name: company?.name ?? proposal.account_name,
+      contact_name: stakeholder?.full_name ?? proposal.contact_name,
     })
     if (json) { toast('Action updated', 'success'); onUpdated(json) }
   }
@@ -165,8 +194,8 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
 
           {/* Meta */}
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <InfoRow icon={<User className="w-4 h-4" />} label="Contact" value={proposal.contact_name} />
-            <InfoRow icon={<Building2 className="w-4 h-4" />} label="Account" value={proposal.account_name} />
+            <InfoRow icon={<User className="w-4 h-4" />} label="Contact" value={proposal.stakeholder_name ?? proposal.contact_name} />
+            <InfoRow icon={<Building2 className="w-4 h-4" />} label="Account" value={proposal.company_name ?? proposal.account_name} />
             <InfoRow icon={<Calendar className="w-4 h-4" />} label="Meeting Date" value={formatDate(proposal.source_date)} />
             <InfoRow
               icon={<Calendar className="w-4 h-4" />}
@@ -195,6 +224,59 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
 
           {/* Editable fields */}
           <div className="space-y-4 pt-2 border-t">
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-indigo-950">StakeMap links</p>
+                <p className="text-xs text-indigo-700 mt-0.5">
+                  Connect this action to the shared company and stakeholder records.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Company</label>
+                  <Select
+                    value={companyId}
+                    onChange={(e) => {
+                      const nextCompanyId = e.target.value
+                      setCompanyId(nextCompanyId)
+                      const selectedStakeholder = entities.stakeholders.find(
+                        (option) => option.id === stakeholderId
+                      )
+                      if (selectedStakeholder?.company_id !== nextCompanyId) setStakeholderId('')
+                    }}
+                  >
+                    <option value="">— Not linked —</option>
+                    {entities.companies.map((company) => (
+                      <option key={company.id} value={company.id}>{company.name}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stakeholder</label>
+                  <Select
+                    value={stakeholderId}
+                    onChange={(e) => {
+                      const nextStakeholderId = e.target.value
+                      setStakeholderId(nextStakeholderId)
+                      const stakeholder = entities.stakeholders.find(
+                        (option) => option.id === nextStakeholderId
+                      )
+                      if (stakeholder?.company_id) setCompanyId(stakeholder.company_id)
+                    }}
+                  >
+                    <option value="">— Not linked —</option>
+                    {entities.stakeholders
+                      .filter((stakeholder) => !companyId || stakeholder.company_id === companyId)
+                      .map((stakeholder) => (
+                        <option key={stakeholder.id} value={stakeholder.id}>
+                          {stakeholder.full_name}{stakeholder.title ? ` — ${stakeholder.title}` : ''}
+                        </option>
+                      ))}
+                  </Select>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</label>
