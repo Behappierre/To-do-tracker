@@ -262,9 +262,17 @@ step up before reaching for a full LLM call per import.
 
 ## Open questions for whoever picks this up
 
-- What similarity threshold and title/summary weighting actually works
-  well against this workspace's real data? Needs tuning against a sample
-  once B1/B2 are wired up — the 0.5 starting point above is a guess.
+- ~~What similarity threshold...~~ **Resolved during implementation:**
+  tested the 0.7/0.3 title/summary weighting against real near-duplicate
+  pairs from this workspace's own data (e.g. "Harry to set up meeting with
+  Hitachi Rail contact" vs "Harry to contact Jonathan Speak at Hitachi
+  Rail") — combined scores landed at 0.3–0.5, so the original 0.5
+  threshold silently missed genuine duplicates. Since a false positive
+  only costs the user one click ("Not a match") while a false negative
+  reproduces the exact bug this feature exists to fix, shipped with
+  `MATCH_THRESHOLD = 0.3` instead — verified this still cleanly excludes
+  unrelated actions on the same account (scored ~0.03 in testing). Revisit
+  if it proves too noisy in real use.
 - Should "This supersedes it" also copy `notes`/`dependencies` context from
   the old action into the new one's `summary`, so context isn't lost when
   the old row gets collapsed out of view?
