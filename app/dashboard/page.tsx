@@ -31,6 +31,7 @@ type ViewMode = 'grouped' | 'flat'
 interface ThemeGroup {
   theme: string
   rows: Action[]
+  displayRows: Action[] // root actions only — children render nested under their parent
   hasStalled: boolean   // any client-owned active action ≥ 21 days quiet
 }
 
@@ -41,7 +42,11 @@ interface AccountGroup {
   themes: ThemeGroup[]
 }
 
-function buildGroups(actions: Action[]): AccountGroup[] {
+function buildGroups(actions: Action[], childMap: Record<string, Action[]>, showSuperseded: boolean): AccountGroup[] {
+  const idSet = new Set(actions.map(a => a.id))
+  const isChild = (a: Action) => Boolean(a.parent_id && idSet.has(a.parent_id))
+  const hasChildren = (a: Action) => Boolean(childMap[a.id]?.length)
+
   const byAccount = new Map<string, Action[]>()
   for (const a of actions) {
     const key = a.account_name ?? UNASSIGNED_LABEL
@@ -69,7 +74,10 @@ function buildGroups(actions: Action[]): AccountGroup[] {
       const hasStalled = sorted.some(
         a => a.owner === 'them' && ACTIVE_STATUSES.has(a.status) && (a.days_live ?? 0) >= STALE_DAYS
       )
-      themes.push({ theme, rows: sorted, hasStalled })
+      const displayRows = sorted.filter(a =>
+        !isChild(a) && (showSuperseded || a.status !== 'Superseded' || hasChildren(a))
+      )
+      themes.push({ theme, rows: sorted, displayRows, hasStalled })
     }
 
     // "General / Relationship" always last; rest alphabetical
@@ -110,6 +118,8 @@ export default function DashboardPage() {
   const [viewMode, setViewMode]             = useState<ViewMode>('grouped')
   const [collapsedAccounts, setCollapsedAccounts] = useState<Set<string>>(new Set())
   const [collapsedThemes, setCollapsedThemes]     = useState<Set<string>>(new Set())
+  const [showSuperseded, setShowSuperseded]       = useState(false)
+  const [expandedGrouped, setExpandedGrouped]     = useState<Set<string>>(new Set())
 
   // flat-view sort + drag
   const [sortKey, setSortKey]     = useState<string>('created_at')
@@ -288,32 +298,69 @@ export default function DashboardPage() {
     )
   }
 
+  // ── grouped-view parent/child map (shared by buildGroups + GroupedRow) ─────
+  const groupIdSet = new Set(actions.map(a => a.id))
+  const groupChildMap: Record<string, Action[]> = {}
+  for (const a of actions) {
+    if (a.parent_id && groupIdSet.has(a.parent_id)) {
+      groupChildMap[a.parent_id] = [...(groupChildMap[a.parent_id] ?? []), a]
+    }
+  }
+
   // ── grouped-view row (no Account column) ──────────────────────────────────
-  function GroupedRow({ a }: { a: Action }) {
-    const days      = a.days_live ?? 0
-    const isOverdue = a.expected_by && !['Done', 'Superseded'].includes(a.status) &&
+  function GroupedRow({ a, isChild = false }: { a: Action; isChild?: boolean }) {
+    const days       = a.days_live ?? 0
+    const isOverdue  = a.expected_by && !['Done', 'Superseded'].includes(a.status) &&
       differenceInDays(today, parseISO(a.expected_by)) > 0
+    const children     = groupChildMap[a.id] ?? []
+    const hasChildren   = children.length > 0
+    const isExpandedRow = expandedGrouped.has(a.id)
     return (
-      <tr
-        className="hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-b-0"
-        onClick={() => setSelected(a)}
-      >
-        <td className="px-4 py-2.5 font-medium text-gray-900 max-w-xs">
-          <span className="truncate block">{a.title ?? '—'}</span>
-        </td>
-        <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{a.contact_name ?? '—'}</td>
-        <td className="px-4 py-2.5">
-          <OwnerBadge owner={a.owner} />
-        </td>
-        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDate(a.source_date)}</td>
-        <td className="px-4 py-2.5 whitespace-nowrap">
-          <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
-        </td>
-        <td className={cn('px-4 py-2.5 whitespace-nowrap', isOverdue ? 'text-red-600 font-medium' : 'text-gray-500')}>
-          {formatDate(a.expected_by)}{a.expected_by_is_approximate && a.expected_by ? ' ~' : ''}
-        </td>
-        <td className="px-4 py-2.5"><StatusBadge status={a.status} /></td>
-      </tr>
+      <>
+        <tr
+          className={cn(
+            'hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-b-0',
+            isChild && 'bg-gray-50/50'
+          )}
+          onClick={() => setSelected(a)}
+        >
+          <td className="px-4 py-2.5 font-medium text-gray-900 max-w-xs">
+            <div className={cn('flex items-center gap-1 truncate', isChild && 'pl-6')}>
+              {isChild && <span className="shrink-0 w-3 h-3 border-l-2 border-b-2 border-gray-300 rounded-bl -mt-2 mr-1" />}
+              {hasChildren && (
+                <button
+                  className="shrink-0 text-gray-400 hover:text-gray-700 p-0.5 rounded"
+                  onClick={e => {
+                    e.stopPropagation()
+                    setExpandedGrouped(prev => {
+                      const next = new Set(prev)
+                      if (next.has(a.id)) { next.delete(a.id) } else { next.add(a.id) }
+                      return next
+                    })
+                  }}
+                >
+                  {isExpandedRow ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                </button>
+              )}
+              <span className={cn('truncate', isChild && 'text-gray-600 font-normal')}>{a.title ?? '—'}</span>
+              {hasChildren && <span className="ml-1 shrink-0 text-xs text-gray-400 font-normal">({children.length})</span>}
+            </div>
+          </td>
+          <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{a.contact_name ?? '—'}</td>
+          <td className="px-4 py-2.5">
+            <OwnerBadge owner={a.owner} />
+          </td>
+          <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDate(a.source_date)}</td>
+          <td className="px-4 py-2.5 whitespace-nowrap">
+            <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
+          </td>
+          <td className={cn('px-4 py-2.5 whitespace-nowrap', isOverdue ? 'text-red-600 font-medium' : 'text-gray-500')}>
+            {formatDate(a.expected_by)}{a.expected_by_is_approximate && a.expected_by ? ' ~' : ''}
+          </td>
+          <td className="px-4 py-2.5"><StatusBadge status={a.status} /></td>
+        </tr>
+        {hasChildren && isExpandedRow && children.map(child => <GroupedRow key={child.id} a={child} isChild />)}
+      </>
     )
   }
 
@@ -329,7 +376,7 @@ export default function DashboardPage() {
   ]
 
   // ── grouped-view rendering ─────────────────────────────────────────────────
-  const groups = buildGroups(actions)
+  const groups = buildGroups(actions, groupChildMap, showSuperseded)
 
   const toggleAccount = (key: string) =>
     setCollapsedAccounts(prev => { const next = new Set(prev); if (next.has(key)) { next.delete(key) } else { next.add(key) } return next })
@@ -416,6 +463,17 @@ export default function DashboardPage() {
             <List className="w-4 h-4" /> Flat
           </button>
         </div>
+        {viewMode === 'grouped' && (
+          <label className="flex items-center gap-2 self-start text-sm text-gray-500 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showSuperseded}
+              onChange={e => setShowSuperseded(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+            />
+            Show superseded
+          </label>
+        )}
       </div>
 
       {/* Error */}
@@ -504,7 +562,7 @@ export default function DashboardPage() {
                 </button>
 
                 {/* Theme groups */}
-                {!acctCollapsed && acctGroup.themes.map(themeGroup => {
+                {!acctCollapsed && acctGroup.themes.filter(t => t.displayRows.length > 0).map(themeGroup => {
                   const themeKey      = `${acctGroup.account}:${themeGroup.theme}`
                   const themeCollapsed = collapsedThemes.has(themeKey)
 
@@ -519,7 +577,7 @@ export default function DashboardPage() {
                           {themeCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </span>
                         <span className="text-sm font-medium text-gray-700 flex-1">{themeGroup.theme}</span>
-                        <span className="text-xs text-gray-400">{themeGroup.rows.length} action{themeGroup.rows.length !== 1 ? 's' : ''}</span>
+                        <span className="text-xs text-gray-400">{themeGroup.displayRows.length} action{themeGroup.displayRows.length !== 1 ? 's' : ''}</span>
                         {themeGroup.hasStalled && (
                           <span className="flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                             <AlertCircle className="w-3 h-3" /> client stalled
@@ -539,7 +597,7 @@ export default function DashboardPage() {
                               </tr>
                             </thead>
                             <tbody>
-                              {themeGroup.rows.map(a => <GroupedRow key={a.id} a={a} />)}
+                              {themeGroup.displayRows.map(a => <GroupedRow key={a.id} a={a} />)}
                             </tbody>
                           </table>
                         </div>
