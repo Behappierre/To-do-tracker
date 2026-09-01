@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
 import { formatDate, daysLiveBg, cn } from '@/lib/utils'
+import { getInternalTeamOptions } from '@/lib/internal-team'
 
 interface DrawerProps {
   proposal: Action | null
@@ -41,6 +42,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
   const [parentId, setParentId]                 = useState<string>('')
   const [companyId, setCompanyId]               = useState('')
   const [stakeholderId, setStakeholderId]       = useState('')
+  const [followUpId, setFollowUpId]             = useState('')
   const [entities, setEntities]                 = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [saving, setSaving]                     = useState(false)
   const [confirmDelete, setConfirmDelete]       = useState(false)
@@ -58,6 +60,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       setParentId(proposal.parent_id ?? '')
       setCompanyId(proposal.company_id ?? '')
       setStakeholderId(proposal.primary_stakeholder_id ?? '')
+      setFollowUpId(proposal.internal_followup_stakeholder_id ?? '')
       setConfirmDelete(false)
     }
   }, [proposal])
@@ -80,6 +83,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
 
   const parentOptions = proposals.filter(p => p.id !== proposal.id && !p.parent_id)
   const hasChildren   = proposals.some(p => p.parent_id === proposal.id)
+  const internalTeam  = getInternalTeamOptions(entities)
 
   const patch = async (body: Record<string, unknown>) => {
     setSaving(true)
@@ -112,6 +116,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       parent_id: parentId || null,
       company_id: companyId || null,
       primary_stakeholder_id: stakeholderId || null,
+      internal_followup_stakeholder_id: followUpId || null,
       account_name: company?.name ?? proposal.account_name,
       contact_name: stakeholder?.full_name ?? proposal.contact_name,
     })
@@ -291,6 +296,23 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
                   <option value="them">Them (client)</option>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Responsible (Netcompany)
+              </label>
+              <Select value={followUpId} onChange={(e) => setFollowUpId(e.target.value)}>
+                <option value="">— Not set —</option>
+                {internalTeam.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.full_name}{person.title ? ` — ${person.title}` : ''}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-gray-400">
+                Netcompany-side person chasing this, even for client-owned actions.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

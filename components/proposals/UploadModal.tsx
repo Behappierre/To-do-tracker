@@ -18,6 +18,7 @@ import {
 } from '@/types/proposal'
 import { cn, formatDate } from '@/lib/utils'
 import { similarity, normalize } from '@/lib/similarity'
+import { getInternalTeamOptions, getDefaultFollowUpStakeholderIdFromEntities } from '@/lib/internal-team'
 
 interface UploadModalProps {
   open: boolean
@@ -37,6 +38,7 @@ type DraftAction = ExtractedAction & {
   notes: string
   company_id: string | null
   primary_stakeholder_id: string | null
+  internal_followup_stakeholder_id: string | null
 }
 
 interface DuplicateMatch {
@@ -51,6 +53,7 @@ function emptyDraft(): DraftAction {
     expected_by_is_approximate: false, strategic_weight: null,
     dependencies: null, summary: null, status: 'Open', notes: '',
     company_id: null, primary_stakeholder_id: null,
+    internal_followup_stakeholder_id: null,
   }
 }
 
@@ -104,6 +107,17 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       .catch(() => toast('Company and stakeholder links are temporarily unavailable', 'error'))
   }, [open, entities.companies.length, toast])
 
+  // Safety net: if entities finish loading after drafts already exist,
+  // backfill the default follow-up owner onto drafts that still don't have
+  // one — never overwrite a draft the reviewer already set explicitly.
+  useEffect(() => {
+    const defaultId = getDefaultFollowUpStakeholderIdFromEntities(entities)
+    if (!defaultId) return
+    setDrafts((prev) => prev.map((d) =>
+      d.internal_followup_stakeholder_id === null ? { ...d, internal_followup_stakeholder_id: defaultId } : d
+    ))
+  }, [entities])
+
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
     setDrafts([]); setSelected([]); setExpanded([])
@@ -126,7 +140,12 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       }
 
       const extracted: ExtractedAction[] = json.proposals
-      const d = extracted.map((e) => ({ ...emptyDraft(), ...e }))
+      const defaultFollowUpId = getDefaultFollowUpStakeholderIdFromEntities(entities)
+      const d = extracted.map((e) => ({
+        ...emptyDraft(),
+        ...e,
+        internal_followup_stakeholder_id: defaultFollowUpId,
+      }))
 
       // Duplicate suggestions are best-effort — if this fails, extraction still proceeds.
       let candidates: Action[] = []
@@ -490,6 +509,17 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                           <Select value={draft.owner} onChange={(e) => updateDraft(i, 'owner', e.target.value as ActionOwner)}>
                             <option value="us">Us (our team)</option>
                             <option value="them">Them (client)</option>
+                          </Select>
+                        </Field>
+                        <Field label="Responsible (Netcompany)">
+                          <Select
+                            value={draft.internal_followup_stakeholder_id ?? ''}
+                            onChange={(e) => updateDraft(i, 'internal_followup_stakeholder_id', e.target.value || null)}
+                          >
+                            <option value="">— Not set —</option>
+                            {getInternalTeamOptions(entities).map((person) => (
+                              <option key={person.id} value={person.id}>{person.full_name}</option>
+                            ))}
                           </Select>
                         </Field>
                         <Field label="Meeting Date">
