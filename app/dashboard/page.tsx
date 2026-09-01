@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { UploadModal } from '@/components/proposals/UploadModal'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
 import { formatDate, daysLiveColor, cn } from '@/lib/utils'
@@ -21,6 +22,7 @@ import { differenceInDays, parseISO, compareAsc } from 'date-fns'
 const STATUSES: ActionStatus[]   = ['Open', 'Nudged', 'In Progress', 'Done', 'Stalled', 'Superseded']
 const WEIGHTS: StrategicWeight[] = ['Low', 'Medium', 'Medium-High', 'High']
 const ACTIVE_STATUSES            = new Set<ActionStatus>(['Open', 'Nudged', 'In Progress', 'Stalled'])
+const LIVE_STATUSES              = new Set<ActionStatus>(['Open', 'Nudged', 'In Progress'])
 const STALE_DAYS                 = 21
 const UNASSIGNED_LABEL           = 'Unassigned / General'
 const NO_THEME_LABEL             = 'General / Relationship'
@@ -119,6 +121,7 @@ export default function DashboardPage() {
   const [collapsedAccounts, setCollapsedAccounts] = useState<Set<string>>(new Set())
   const [collapsedThemes, setCollapsedThemes]     = useState<Set<string>>(new Set())
   const [showSuperseded, setShowSuperseded]       = useState(false)
+  const [liveOnly, setLiveOnly]                   = useState(false)
   const [expandedGrouped, setExpandedGrouped]     = useState<Set<string>>(new Set())
 
   // flat-view sort + drag
@@ -173,6 +176,11 @@ export default function DashboardPage() {
 
   const openActions = actions.filter(a => ACTIVE_STATUSES.has(a.status))
 
+  // Live-only view filter — Open/Nudged/In Progress. Distinct from
+  // ACTIVE_STATUSES (which also counts Stalled) — this is purely a display
+  // toggle for the Grouped/Flat tables, KPIs above are unaffected.
+  const viewActions = liveOnly ? actions.filter(a => LIVE_STATUSES.has(a.status)) : actions
+
   const handleExportCsv = () => downloadCsv(openActions)
   const handleCopyText = async () => {
     await copyActionsAsText(openActions)
@@ -195,7 +203,7 @@ export default function DashboardPage() {
     else { setSortKey(key); setSortDir('asc') }
   }
 
-  const sorted = [...actions].sort((a, b) => {
+  const sorted = [...viewActions].sort((a, b) => {
     let cmp = 0
     if (sortKey === 'title')        cmp = (a.title ?? '').localeCompare(b.title ?? '')
     else if (sortKey === 'account_name') cmp = (a.account_name ?? '').localeCompare(b.account_name ?? '')
@@ -297,9 +305,9 @@ export default function DashboardPage() {
   }
 
   // ── grouped-view parent/child map (shared by buildGroups + GroupedRow) ─────
-  const groupIdSet = new Set(actions.map(a => a.id))
+  const groupIdSet = new Set(viewActions.map(a => a.id))
   const groupChildMap: Record<string, Action[]> = {}
-  for (const a of actions) {
+  for (const a of viewActions) {
     if (a.parent_id && groupIdSet.has(a.parent_id)) {
       groupChildMap[a.parent_id] = [...(groupChildMap[a.parent_id] ?? []), a]
     }
@@ -372,7 +380,7 @@ export default function DashboardPage() {
   ]
 
   // ── grouped-view rendering ─────────────────────────────────────────────────
-  const groups = buildGroups(actions, groupChildMap, showSuperseded)
+  const groups = buildGroups(viewActions, groupChildMap, showSuperseded)
 
   const toggleAccount = (key: string) =>
     setCollapsedAccounts(prev => { const next = new Set(prev); if (next.has(key)) { next.delete(key) } else { next.add(key) } return next })
@@ -442,34 +450,29 @@ export default function DashboardPage() {
             {WEIGHTS.map(w => <option key={w} value={w}>{w}</option>)}
           </Select>
         </div>
-        {/* View toggle */}
-        <div className="flex items-center gap-1 self-start bg-gray-100 rounded-lg p-1">
-          <button
-            onClick={() => setViewMode('grouped')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'grouped' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
-          >
-            <LayoutList className="w-4 h-4" /> Grouped
-          </button>
-          <button
-            onClick={() => setViewMode('flat')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'flat' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
-          >
-            <List className="w-4 h-4" /> Flat
-          </button>
+        {/* View toggle + display switches */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('grouped')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'grouped' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              <LayoutList className="w-4 h-4" /> Grouped
+            </button>
+            <button
+              onClick={() => setViewMode('flat')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'flat' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              <List className="w-4 h-4" /> Flat
+            </button>
+          </div>
+          <Switch checked={liveOnly} onChange={setLiveOnly} label="Live only" title="Open / Nudged / In Progress" />
+          {viewMode === 'grouped' && (
+            <Switch checked={showSuperseded} onChange={setShowSuperseded} label="Show superseded" />
+          )}
         </div>
-        {viewMode === 'grouped' && (
-          <label className="flex items-center gap-2 self-start text-sm text-gray-500 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={showSuperseded}
-              onChange={e => setShowSuperseded(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-            />
-            Show superseded
-          </label>
-        )}
       </div>
 
       {/* Error */}
