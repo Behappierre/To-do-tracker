@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Building2, Check, GitCompareArrows, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
+import { Building2, Check, Copy, GitCompareArrows, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
 import Link from 'next/link'
 import { Action, EntityOptions } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
+import { normalize, bestSuggestion } from '@/lib/similarity'
 
 type QueueFilter = 'all' | 'company' | 'stakeholder'
 
@@ -17,53 +18,7 @@ interface DraftLink {
   stakeholderId: string
 }
 
-interface Suggestion<T> {
-  option: T
-  score: number
-}
-
 const PAGE_SIZE = 25
-
-function normalize(value: string | null | undefined) {
-  return (value ?? '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-}
-
-function similarity(source: string | null, candidate: string) {
-  const left = normalize(source)
-  const right = normalize(candidate)
-  if (!left || !right) return 0
-  if (left === right) return 1
-  if (left.includes(right) || right.includes(left)) return 0.88
-
-  const leftTokens = new Set(left.split(' '))
-  const rightTokens = new Set(right.split(' '))
-  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length
-  const union = new Set([...leftTokens, ...rightTokens]).size
-  return union ? intersection / union : 0
-}
-
-function bestSuggestion<T>(
-  source: string | null,
-  options: T[],
-  label: (option: T) => string,
-  minimumScore = 0.34
-): Suggestion<T> | null {
-  let best: Suggestion<T> | null = null
-
-  for (const option of options) {
-    const score = similarity(source, label(option))
-    if (score >= minimumScore && (!best || score > best.score)) {
-      best = { option, score }
-    }
-  }
-
-  return best
-}
 
 export default function ActionLinkReviewPage() {
   const { toast } = useToast()
@@ -221,13 +176,22 @@ export default function ActionLinkReviewPage() {
             Suggestions never save automatically.
           </p>
         </div>
-        <Link
-          href="/dashboard/action-review/compare"
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
-        >
-          <GitCompareArrows className="h-4 w-4" />
-          Compare decisions
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dashboard/action-review/duplicates"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+          >
+            <Copy className="h-4 w-4" />
+            Duplicate review
+          </Link>
+          <Link
+            href="/dashboard/action-review/compare"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+          >
+            <GitCompareArrows className="h-4 w-4" />
+            Compare decisions
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

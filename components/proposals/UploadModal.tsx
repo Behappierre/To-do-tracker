@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, DragEvent, ChangeEvent } from 'react'
-import { Upload, FileText, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, ClipboardPaste } from 'lucide-react'
+import { Upload, FileText, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, ClipboardPaste, AlertTriangle } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,13 +9,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
 import {
+  Action,
   ExtractedAction,
   ActionStatus,
   ActionOwner,
   StrategicWeight,
   EntityOptions,
 } from '@/types/proposal'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
+import { similarity, normalize } from '@/lib/similarity'
 
 interface UploadModalProps {
   open: boolean
@@ -25,14 +27,21 @@ interface UploadModalProps {
 
 type Stage = 'drop' | 'reading' | 'extracting' | 'preview' | 'saving'
 type InputMode = 'pdf' | 'text'
+type DupResolution = 'new' | 'supersede' | 'dismissed'
 
 const STATUSES: ActionStatus[]       = ['Open', 'Nudged', 'In Progress', 'Done', 'Stalled', 'Superseded']
 const WEIGHTS: StrategicWeight[]     = ['Low', 'Medium', 'Medium-High', 'High']
+const MATCH_THRESHOLD                = 0.3
 
 type DraftAction = ExtractedAction & {
   notes: string
   company_id: string | null
   primary_stakeholder_id: string | null
+}
+
+interface DuplicateMatch {
+  action: Action
+  score: number
 }
 
 function emptyDraft(): DraftAction {
@@ -43,6 +52,28 @@ function emptyDraft(): DraftAction {
     dependencies: null, summary: null, status: 'Open', notes: '',
     company_id: null, primary_stakeholder_id: null,
   }
+}
+
+// Scores a draft against an existing open action: title similarity carries
+// most of the weight, summary similarity breaks ties between similarly
+// titled but unrelated actions on the same account.
+function scoreCandidate(draft: DraftAction, candidate: Action): number {
+  return 0.7 * similarity(draft.title, candidate.title) + 0.3 * similarity(draft.summary, candidate.summary)
+}
+
+function findBestMatch(draft: DraftAction, candidates: Action[]): DuplicateMatch | null {
+  const draftAccount = normalize(draft.account_name)
+  if (!draftAccount) return null
+
+  let best: DuplicateMatch | null = null
+  for (const candidate of candidates) {
+    if (normalize(candidate.account_name) !== draftAccount) continue
+    const score = scoreCandidate(draft, candidate)
+    if (score >= MATCH_THRESHOLD && (!best || score > best.score)) {
+      best = { action: candidate, score }
+    }
+  }
+  return best
 }
 
 export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
@@ -58,6 +89,8 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const [selected, setSelected]     = useState<boolean[]>([])
   const [expanded, setExpanded]     = useState<boolean[]>([])
   const [entities, setEntities]     = useState<EntityOptions>({ companies: [], stakeholders: [] })
+  const [matches, setMatches]       = useState<(DuplicateMatch | null)[]>([])
+  const [resolutions, setResolutions] = useState<DupResolution[]>([])
 
   useEffect(() => {
     if (!open || entities.companies.length > 0) return
@@ -74,6 +107,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
     setDrafts([]); setSelected([]); setExpanded([])
+    setMatches([]); setResolutions([])
   }
 
   const handleClose = () => { reset(); onClose() }
@@ -93,7 +127,23 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
       const extracted: ExtractedAction[] = json.proposals
       const d = extracted.map((e) => ({ ...emptyDraft(), ...e }))
+
+      // Duplicate suggestions are best-effort — if this fails, extraction still proceeds.
+      let candidates: Action[] = []
+      try {
+        const candidatesRes = await fetch('/api/proposals')
+        if (candidatesRes.ok) {
+          const all: Action[] = await candidatesRes.json()
+          candidates = all.filter((a) => a.status !== 'Done' && a.status !== 'Superseded')
+        }
+      } catch {
+        // ignore — matching is skipped, not fatal
+      }
+      const foundMatches = d.map((draft) => findBestMatch(draft, candidates))
+
       setDrafts(d)
+      setMatches(foundMatches)
+      setResolutions(foundMatches.map(() => 'new'))
       setSelected(d.map(() => true))
       setExpanded(d.map((_, i) => i === 0))
       setStage('preview')
@@ -176,23 +226,43 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const toggleExpand = (i: number) =>
     setExpanded((prev) => prev.map((v, idx) => idx === i ? !v : v))
 
+  const setResolution = (i: number, resolution: DupResolution) =>
+    setResolutions((prev) => prev.map((v, idx) => idx === i ? resolution : v))
+
   const handleSave = async () => {
-    const toSave = drafts.filter((_, i) => selected[i])
+    const toSave = drafts
+      .map((draft, i) => ({ draft, i }))
+      .filter(({ i }) => selected[i])
     if (toSave.length === 0) { toast('Select at least one action to save', 'error'); return }
 
     setStage('saving')
     let savedCount = 0
-    for (const draft of toSave) {
+    for (const { draft, i } of toSave) {
+      const resolution = resolutions[i]
+      const match = matches[i]
       try {
         const body: Record<string, unknown> = { ...draft }
         if (pdfBase64) { body.pdfBase64 = pdfBase64; body.pdf_filename = filename }
+        if (resolution === 'supersede' && match) { body.parent_id = match.action.id }
+
         const res = await fetch('/api/proposals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         })
-        if (res.ok) savedCount++
-        else {
+        if (res.ok) {
+          savedCount++
+          if (resolution === 'supersede' && match) {
+            const supersedeRes = await fetch(`/api/proposals/${match.action.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'Superseded' }),
+            })
+            if (!supersedeRes.ok) {
+              toast(`Saved "${draft.title ?? 'action'}", but couldn't mark "${match.action.title ?? 'the previous action'}" as superseded`, 'error')
+            }
+          }
+        } else {
           const j = await res.json()
           toast(`Failed to save "${draft.title ?? 'action'}": ${j.error}`, 'error')
         }
@@ -340,6 +410,44 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                       {expanded[i] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                   </div>
+
+                  {matches[i] && resolutions[i] !== 'dismissed' && (
+                    <div className="mx-4 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          Possible match: <strong>{matches[i]!.action.title ?? 'Untitled'}</strong>
+                          {' '}({Math.round(matches[i]!.score * 100)}%) — opened {formatDate(matches[i]!.action.source_date ?? matches[i]!.action.created_at)}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5 mt-2">
+                        <button
+                          onClick={() => setResolution(i, 'new')}
+                          className={cn(
+                            'px-2 py-1 rounded-md font-medium transition-colors',
+                            resolutions[i] === 'new' ? 'bg-white shadow-sm text-amber-900' : 'text-amber-700 hover:bg-white/60'
+                          )}
+                        >
+                          Save as new
+                        </button>
+                        <button
+                          onClick={() => setResolution(i, 'supersede')}
+                          className={cn(
+                            'px-2 py-1 rounded-md font-medium transition-colors',
+                            resolutions[i] === 'supersede' ? 'bg-white shadow-sm text-amber-900' : 'text-amber-700 hover:bg-white/60'
+                          )}
+                        >
+                          This supersedes it
+                        </button>
+                        <button
+                          onClick={() => setResolution(i, 'dismissed')}
+                          className="px-2 py-1 rounded-md font-medium text-amber-700 hover:bg-white/60 transition-colors"
+                        >
+                          Not a match
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {expanded[i] && (
                     <div className="px-4 pb-4 space-y-3 border-t pt-3">
