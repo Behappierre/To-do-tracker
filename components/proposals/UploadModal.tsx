@@ -91,6 +91,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const [drafts, setDrafts]         = useState<DraftAction[]>([])
   const [selected, setSelected]     = useState<boolean[]>([])
   const [expanded, setExpanded]     = useState<boolean[]>([])
+  const [showMore, setShowMore]     = useState<boolean[]>([])
   const [entities, setEntities]     = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [matches, setMatches]       = useState<(DuplicateMatch | null)[]>([])
   const [resolutions, setResolutions] = useState<DupResolution[]>([])
@@ -120,7 +121,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
-    setDrafts([]); setSelected([]); setExpanded([])
+    setDrafts([]); setSelected([]); setExpanded([]); setShowMore([])
     setMatches([]); setResolutions([])
   }
 
@@ -165,6 +166,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       setResolutions(foundMatches.map(() => 'new'))
       setSelected(d.map(() => true))
       setExpanded(d.map((_, i) => i === 0))
+      setShowMore(d.map(() => false))
       setStage('preview')
     } catch {
       toast('Upload failed. Please try again.', 'error')
@@ -244,6 +246,9 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
   const toggleExpand = (i: number) =>
     setExpanded((prev) => prev.map((v, idx) => idx === i ? !v : v))
+
+  const toggleShowMore = (i: number) =>
+    setShowMore((prev) => prev.map((v, idx) => idx === i ? !v : v))
 
   const setResolution = (i: number, resolution: DupResolution) =>
     setResolutions((prev) => prev.map((v, idx) => idx === i ? resolution : v))
@@ -499,12 +504,6 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                               ))}
                           </Select>
                         </Field>
-                        <Field label="Account">
-                          <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />
-                        </Field>
-                        <Field label="Contact Name">
-                          <Input value={draft.contact_name ?? ''} onChange={(e) => updateDraft(i, 'contact_name', e.target.value)} />
-                        </Field>
                         <Field label="Owner">
                           <Select value={draft.owner} onChange={(e) => updateDraft(i, 'owner', e.target.value as ActionOwner)}>
                             <option value="us">Us (our team)</option>
@@ -522,17 +521,8 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                             ))}
                           </Select>
                         </Field>
-                        <Field label="Meeting Date">
-                          <Input type="date" value={draft.source_date ?? ''} onChange={(e) => updateDraft(i, 'source_date', e.target.value)} />
-                        </Field>
                         <Field label="Expected By">
                           <Input type="date" value={draft.expected_by ?? ''} onChange={(e) => updateDraft(i, 'expected_by', e.target.value)} />
-                        </Field>
-                        <Field label="Strategic Weight">
-                          <Select value={draft.strategic_weight ?? ''} onChange={(e) => updateDraft(i, 'strategic_weight', e.target.value as StrategicWeight || null)}>
-                            <option value="">— Not set —</option>
-                            {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
-                          </Select>
                         </Field>
                         <Field label="Status">
                           <Select value={draft.status} onChange={(e) => updateDraft(i, 'status', e.target.value as ActionStatus)}>
@@ -540,25 +530,56 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                           </Select>
                         </Field>
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="checkbox"
-                          id={`approx-${i}`}
-                          checked={draft.expected_by_is_approximate}
-                          onChange={(e) => updateDraft(i, 'expected_by_is_approximate', e.target.checked)}
-                          className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-                        />
-                        <label htmlFor={`approx-${i}`} className="text-xs text-gray-500">Expected by date is approximate</label>
-                      </div>
-                      <Field label="Dependencies">
-                        <Input value={draft.dependencies ?? ''} onChange={(e) => updateDraft(i, 'dependencies', e.target.value)} />
-                      </Field>
+
                       <Field label="Context / Summary">
                         <Textarea rows={2} value={draft.summary ?? ''} onChange={(e) => updateDraft(i, 'summary', e.target.value)} />
                       </Field>
-                      <Field label="Notes">
-                        <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
-                      </Field>
+
+                      <button
+                        onClick={() => toggleShowMore(i)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
+                      >
+                        {showMore[i] ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        Show more fields
+                      </button>
+
+                      {showMore[i] && (
+                        <div className="space-y-3 pt-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <Field label="Account">
+                              <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />
+                            </Field>
+                            <Field label="Contact Name">
+                              <Input value={draft.contact_name ?? ''} onChange={(e) => updateDraft(i, 'contact_name', e.target.value)} />
+                            </Field>
+                            <Field label="Meeting Date">
+                              <Input type="date" value={draft.source_date ?? ''} onChange={(e) => updateDraft(i, 'source_date', e.target.value)} />
+                            </Field>
+                            <Field label="Strategic Weight">
+                              <Select value={draft.strategic_weight ?? ''} onChange={(e) => updateDraft(i, 'strategic_weight', e.target.value as StrategicWeight || null)}>
+                                <option value="">— Not set —</option>
+                                {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+                              </Select>
+                            </Field>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`approx-${i}`}
+                              checked={draft.expected_by_is_approximate}
+                              onChange={(e) => updateDraft(i, 'expected_by_is_approximate', e.target.checked)}
+                              className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                            />
+                            <label htmlFor={`approx-${i}`} className="text-xs text-gray-500">Expected by date is approximate</label>
+                          </div>
+                          <Field label="Dependencies">
+                            <Input value={draft.dependencies ?? ''} onChange={(e) => updateDraft(i, 'dependencies', e.target.value)} />
+                          </Field>
+                          <Field label="Notes">
+                            <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
+                          </Field>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

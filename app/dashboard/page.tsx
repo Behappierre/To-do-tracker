@@ -198,9 +198,8 @@ export default function DashboardPage() {
   const sorted = [...actions].sort((a, b) => {
     let cmp = 0
     if (sortKey === 'title')        cmp = (a.title ?? '').localeCompare(b.title ?? '')
-    else if (sortKey === 'contact_name') cmp = (a.contact_name ?? '').localeCompare(b.contact_name ?? '')
     else if (sortKey === 'account_name') cmp = (a.account_name ?? '').localeCompare(b.account_name ?? '')
-    else if (sortKey === 'source_date')  cmp = a.source_date && b.source_date ? compareAsc(parseISO(a.source_date), parseISO(b.source_date)) : (a.source_date ? 1 : -1)
+    else if (sortKey === 'responsible')  cmp = (a.internal_followup_name ?? '').localeCompare(b.internal_followup_name ?? '')
     else if (sortKey === 'days_live')    cmp = (a.days_live ?? 0) - (b.days_live ?? 0)
     else if (sortKey === 'expected_by')  cmp = a.expected_by && b.expected_by ? compareAsc(parseISO(a.expected_by), parseISO(b.expected_by)) : (a.expected_by ? 1 : -1)
     else if (sortKey === 'status')  cmp = a.status.localeCompare(b.status)
@@ -279,12 +278,11 @@ export default function DashboardPage() {
               {hasChildren && <span className="ml-1 shrink-0 text-xs text-gray-400 font-normal">({children.length})</span>}
             </div>
           </td>
-          <td className="px-4 py-3 text-gray-600">{a.contact_name ?? '—'}</td>
           <td className="px-4 py-3 text-gray-600">{a.account_name ?? '—'}</td>
+          <td className="px-4 py-3 text-gray-600">{a.internal_followup_name ?? '—'}</td>
           <td className="px-4 py-3">
             <OwnerBadge owner={a.owner} />
           </td>
-          <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(a.source_date)}</td>
           <td className="px-4 py-3 whitespace-nowrap">
             <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
           </td>
@@ -346,11 +344,10 @@ export default function DashboardPage() {
               {hasChildren && <span className="ml-1 shrink-0 text-xs text-gray-400 font-normal">({children.length})</span>}
             </div>
           </td>
-          <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{a.contact_name ?? '—'}</td>
+          <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{a.internal_followup_name ?? '—'}</td>
           <td className="px-4 py-2.5">
             <OwnerBadge owner={a.owner} />
           </td>
-          <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDate(a.source_date)}</td>
           <td className="px-4 py-2.5 whitespace-nowrap">
             <span className={cn('font-semibold', daysLiveColor(days))}>{days}d</span>
           </td>
@@ -366,13 +363,12 @@ export default function DashboardPage() {
 
   // ── grouped-view columns ───────────────────────────────────────────────────
   const GROUPED_COLS = [
-    { key: 'title',       label: 'Action'      },
-    { key: 'contact',     label: 'Contact'     },
-    { key: 'owner',       label: 'Owner'       },
-    { key: 'source_date', label: 'Meeting'     },
-    { key: 'days_live',   label: 'Days Quiet'  },
-    { key: 'expected_by', label: 'Expected By' },
-    { key: 'status',      label: 'Status'      },
+    { key: 'title',        label: 'Action'      },
+    { key: 'responsible',  label: 'Responsible' },
+    { key: 'owner',        label: 'Owner'       },
+    { key: 'days_live',    label: 'Days Quiet'  },
+    { key: 'expected_by',  label: 'Expected By' },
+    { key: 'status',       label: 'Status'      },
   ]
 
   // ── grouped-view rendering ─────────────────────────────────────────────────
@@ -508,10 +504,9 @@ export default function DashboardPage() {
                 <tr className="border-b bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
                   {([
                     { key: 'title',        label: 'Action'      },
-                    { key: 'contact_name', label: 'Contact'     },
                     { key: 'account_name', label: 'Account'     },
+                    { key: 'responsible',  label: 'Responsible' },
                     { key: 'owner',        label: 'Owner'       },
-                    { key: 'source_date',  label: 'Meeting'     },
                     { key: 'days_live',    label: 'Days Quiet'  },
                     { key: 'expected_by',  label: 'Expected By' },
                     { key: 'status',       label: 'Status'      },
