@@ -7,19 +7,23 @@ import { getBusinessDevelopmentWorkspaceId } from '@/lib/workspace'
 const ACTION_SELECT = `
   *,
   company:companies!proposals_company_fk(name),
-  primary_stakeholder:stakeholders!proposals_primary_stakeholder_fk(full_name)
+  primary_stakeholder:stakeholders!proposals_primary_stakeholder_fk(full_name),
+  internal_followup:stakeholders!proposals_internal_followup_fk(full_name)
 `
 
 function formatAction(row: Record<string, unknown>) {
   const company = row.company as { name?: string } | null
   const stakeholder = row.primary_stakeholder as { full_name?: string } | null
+  const internalFollowup = row.internal_followup as { full_name?: string } | null
 
   return {
     ...row,
     company: undefined,
     primary_stakeholder: undefined,
+    internal_followup: undefined,
     company_name: company?.name ?? null,
     stakeholder_name: stakeholder?.full_name ?? null,
+    internal_followup_name: internalFollowup?.full_name ?? null,
     days_live: computeDaysLive(row.updated_at as string | null),
   }
 }
@@ -36,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       'status', 'notes', 'expected_by', 'expected_by_is_approximate',
       'title', 'account_name', 'contact_name', 'source_date', 'summary',
       'owner', 'strategic_weight', 'dependencies', 'parallel_route', 'parent_id',
-      'company_id', 'primary_stakeholder_id',
+      'company_id', 'primary_stakeholder_id', 'internal_followup_stakeholder_id',
       'company_link_status', 'stakeholder_link_status',
     ]
 

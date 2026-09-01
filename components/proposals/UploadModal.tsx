@@ -18,6 +18,7 @@ import {
 } from '@/types/proposal'
 import { cn, formatDate } from '@/lib/utils'
 import { similarity, normalize } from '@/lib/similarity'
+import { getInternalTeamOptions, getDefaultFollowUpStakeholderIdFromEntities } from '@/lib/internal-team'
 
 interface UploadModalProps {
   open: boolean
@@ -35,13 +36,16 @@ const MATCH_THRESHOLD                = 0.3
 
 type DraftAction = ExtractedAction & {
   notes: string
-  company_id: string | null
-  primary_stakeholder_id: string | null
+  internal_followup_stakeholder_id: string | null
 }
 
 interface DuplicateMatch {
   action: Action
   score: number
+  // 'text' = found by the deterministic fuzzy matcher (Part B); 'ai' = the
+  // extraction model's own possible_continuation_of hint, used only when
+  // the text matcher found nothing on its own.
+  source: 'text' | 'ai'
 }
 
 function emptyDraft(): DraftAction {
@@ -50,7 +54,8 @@ function emptyDraft(): DraftAction {
     owner: 'them', source_date: null, expected_by: null,
     expected_by_is_approximate: false, strategic_weight: null,
     dependencies: null, summary: null, status: 'Open', notes: '',
-    company_id: null, primary_stakeholder_id: null,
+    theme: null, company_id: null, primary_stakeholder_id: null,
+    possible_continuation_of: null, internal_followup_stakeholder_id: null,
   }
 }
 
@@ -70,10 +75,31 @@ function findBestMatch(draft: DraftAction, candidates: Action[]): DuplicateMatch
     if (normalize(candidate.account_name) !== draftAccount) continue
     const score = scoreCandidate(draft, candidate)
     if (score >= MATCH_THRESHOLD && (!best || score > best.score)) {
-      best = { action: candidate, score }
+      best = { action: candidate, score, source: 'text' }
     }
   }
   return best
+}
+
+// Reconciles the deterministic text match with the extraction model's own
+// possible_continuation_of hint. The text matcher is the proven, auditable
+// signal — it always wins when it finds something. The model's hint only
+// fills in when the text matcher found nothing; when the two disagree, we
+// say so rather than silently picking one.
+function reconcileMatch(
+  textMatch: DuplicateMatch | null,
+  draft: DraftAction,
+  candidates: Action[]
+): { match: DuplicateMatch | null; aiDisagreement: string | null } {
+  const aiCandidate = draft.possible_continuation_of
+    ? candidates.find((c) => c.id === draft.possible_continuation_of)
+    : undefined
+
+  if (!aiCandidate) return { match: textMatch, aiDisagreement: null }
+  if (!textMatch) return { match: { action: aiCandidate, score: 1, source: 'ai' }, aiDisagreement: null }
+  if (textMatch.action.id === aiCandidate.id) return { match: textMatch, aiDisagreement: null }
+
+  return { match: textMatch, aiDisagreement: aiCandidate.title }
 }
 
 export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
@@ -88,9 +114,11 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const [drafts, setDrafts]         = useState<DraftAction[]>([])
   const [selected, setSelected]     = useState<boolean[]>([])
   const [expanded, setExpanded]     = useState<boolean[]>([])
+  const [showMore, setShowMore]     = useState<boolean[]>([])
   const [entities, setEntities]     = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [matches, setMatches]       = useState<(DuplicateMatch | null)[]>([])
   const [resolutions, setResolutions] = useState<DupResolution[]>([])
+  const [aiDisagreements, setAiDisagreements] = useState<(string | null)[]>([])
 
   useEffect(() => {
     if (!open || entities.companies.length > 0) return
@@ -104,10 +132,21 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       .catch(() => toast('Company and stakeholder links are temporarily unavailable', 'error'))
   }, [open, entities.companies.length, toast])
 
+  // Safety net: if entities finish loading after drafts already exist,
+  // backfill the default follow-up owner onto drafts that still don't have
+  // one — never overwrite a draft the reviewer already set explicitly.
+  useEffect(() => {
+    const defaultId = getDefaultFollowUpStakeholderIdFromEntities(entities)
+    if (!defaultId) return
+    setDrafts((prev) => prev.map((d) =>
+      d.internal_followup_stakeholder_id === null ? { ...d, internal_followup_stakeholder_id: defaultId } : d
+    ))
+  }, [entities])
+
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
-    setDrafts([]); setSelected([]); setExpanded([])
-    setMatches([]); setResolutions([])
+    setDrafts([]); setSelected([]); setExpanded([]); setShowMore([])
+    setMatches([]); setResolutions([]); setAiDisagreements([])
   }
 
   const handleClose = () => { reset(); onClose() }
@@ -126,7 +165,12 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       }
 
       const extracted: ExtractedAction[] = json.proposals
-      const d = extracted.map((e) => ({ ...emptyDraft(), ...e }))
+      const defaultFollowUpId = getDefaultFollowUpStakeholderIdFromEntities(entities)
+      const d = extracted.map((e) => ({
+        ...emptyDraft(),
+        ...e,
+        internal_followup_stakeholder_id: defaultFollowUpId,
+      }))
 
       // Duplicate suggestions are best-effort — if this fails, extraction still proceeds.
       let candidates: Action[] = []
@@ -139,13 +183,17 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       } catch {
         // ignore — matching is skipped, not fatal
       }
-      const foundMatches = d.map((draft) => findBestMatch(draft, candidates))
+      const reconciled = d.map((draft) => reconcileMatch(findBestMatch(draft, candidates), draft, candidates))
+      const foundMatches = reconciled.map((r) => r.match)
+      const disagreements = reconciled.map((r) => r.aiDisagreement)
 
       setDrafts(d)
+      setAiDisagreements(disagreements)
       setMatches(foundMatches)
       setResolutions(foundMatches.map(() => 'new'))
       setSelected(d.map(() => true))
       setExpanded(d.map((_, i) => i === 0))
+      setShowMore(d.map(() => false))
       setStage('preview')
     } catch {
       toast('Upload failed. Please try again.', 'error')
@@ -225,6 +273,9 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
 
   const toggleExpand = (i: number) =>
     setExpanded((prev) => prev.map((v, idx) => idx === i ? !v : v))
+
+  const toggleShowMore = (i: number) =>
+    setShowMore((prev) => prev.map((v, idx) => idx === i ? !v : v))
 
   const setResolution = (i: number, resolution: DupResolution) =>
     setResolutions((prev) => prev.map((v, idx) => idx === i ? resolution : v))
@@ -417,9 +468,15 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                         <span>
                           Possible match: <strong>{matches[i]!.action.title ?? 'Untitled'}</strong>
-                          {' '}({Math.round(matches[i]!.score * 100)}%) — opened {formatDate(matches[i]!.action.source_date ?? matches[i]!.action.created_at)}
+                          {' '}({matches[i]!.source === 'ai' ? 'AI-suggested' : `${Math.round(matches[i]!.score * 100)}%`})
+                          {' '}— opened {formatDate(matches[i]!.action.source_date ?? matches[i]!.action.created_at)}
                         </span>
                       </div>
+                      {aiDisagreements[i] && (
+                        <p className="mt-1.5 text-amber-700">
+                          AI also flagged a different possible continuation: &quot;{aiDisagreements[i]}&quot; — check both before deciding.
+                        </p>
+                      )}
                       <div className="flex gap-1.5 mt-2">
                         <button
                           onClick={() => setResolution(i, 'new')}
@@ -480,29 +537,25 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                               ))}
                           </Select>
                         </Field>
-                        <Field label="Account">
-                          <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />
-                        </Field>
-                        <Field label="Contact Name">
-                          <Input value={draft.contact_name ?? ''} onChange={(e) => updateDraft(i, 'contact_name', e.target.value)} />
-                        </Field>
                         <Field label="Owner">
                           <Select value={draft.owner} onChange={(e) => updateDraft(i, 'owner', e.target.value as ActionOwner)}>
                             <option value="us">Us (our team)</option>
                             <option value="them">Them (client)</option>
                           </Select>
                         </Field>
-                        <Field label="Meeting Date">
-                          <Input type="date" value={draft.source_date ?? ''} onChange={(e) => updateDraft(i, 'source_date', e.target.value)} />
+                        <Field label="Responsible (Netcompany)">
+                          <Select
+                            value={draft.internal_followup_stakeholder_id ?? ''}
+                            onChange={(e) => updateDraft(i, 'internal_followup_stakeholder_id', e.target.value || null)}
+                          >
+                            <option value="">— Not set —</option>
+                            {getInternalTeamOptions(entities).map((person) => (
+                              <option key={person.id} value={person.id}>{person.full_name}</option>
+                            ))}
+                          </Select>
                         </Field>
                         <Field label="Expected By">
                           <Input type="date" value={draft.expected_by ?? ''} onChange={(e) => updateDraft(i, 'expected_by', e.target.value)} />
-                        </Field>
-                        <Field label="Strategic Weight">
-                          <Select value={draft.strategic_weight ?? ''} onChange={(e) => updateDraft(i, 'strategic_weight', e.target.value as StrategicWeight || null)}>
-                            <option value="">— Not set —</option>
-                            {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
-                          </Select>
                         </Field>
                         <Field label="Status">
                           <Select value={draft.status} onChange={(e) => updateDraft(i, 'status', e.target.value as ActionStatus)}>
@@ -510,25 +563,59 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                           </Select>
                         </Field>
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="checkbox"
-                          id={`approx-${i}`}
-                          checked={draft.expected_by_is_approximate}
-                          onChange={(e) => updateDraft(i, 'expected_by_is_approximate', e.target.checked)}
-                          className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-                        />
-                        <label htmlFor={`approx-${i}`} className="text-xs text-gray-500">Expected by date is approximate</label>
-                      </div>
-                      <Field label="Dependencies">
-                        <Input value={draft.dependencies ?? ''} onChange={(e) => updateDraft(i, 'dependencies', e.target.value)} />
-                      </Field>
+
                       <Field label="Context / Summary">
                         <Textarea rows={2} value={draft.summary ?? ''} onChange={(e) => updateDraft(i, 'summary', e.target.value)} />
                       </Field>
-                      <Field label="Notes">
-                        <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
-                      </Field>
+
+                      <button
+                        onClick={() => toggleShowMore(i)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
+                      >
+                        {showMore[i] ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        Show more fields
+                      </button>
+
+                      {showMore[i] && (
+                        <div className="space-y-3 pt-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <Field label="Account">
+                              <Input value={draft.account_name ?? ''} onChange={(e) => updateDraft(i, 'account_name', e.target.value)} />
+                            </Field>
+                            <Field label="Contact Name">
+                              <Input value={draft.contact_name ?? ''} onChange={(e) => updateDraft(i, 'contact_name', e.target.value)} />
+                            </Field>
+                            <Field label="Meeting Date">
+                              <Input type="date" value={draft.source_date ?? ''} onChange={(e) => updateDraft(i, 'source_date', e.target.value)} />
+                            </Field>
+                            <Field label="Strategic Weight">
+                              <Select value={draft.strategic_weight ?? ''} onChange={(e) => updateDraft(i, 'strategic_weight', e.target.value as StrategicWeight || null)}>
+                                <option value="">— Not set —</option>
+                                {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+                              </Select>
+                            </Field>
+                            <Field label="Theme">
+                              <Input value={draft.theme ?? ''} onChange={(e) => updateDraft(i, 'theme', e.target.value || null)} />
+                            </Field>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`approx-${i}`}
+                              checked={draft.expected_by_is_approximate}
+                              onChange={(e) => updateDraft(i, 'expected_by_is_approximate', e.target.checked)}
+                              className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                            />
+                            <label htmlFor={`approx-${i}`} className="text-xs text-gray-500">Expected by date is approximate</label>
+                          </div>
+                          <Field label="Dependencies">
+                            <Input value={draft.dependencies ?? ''} onChange={(e) => updateDraft(i, 'dependencies', e.target.value)} />
+                          </Field>
+                          <Field label="Notes">
+                            <Input value={draft.notes} onChange={(e) => updateDraft(i, 'notes', e.target.value)} />
+                          </Field>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -2,24 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthClient } from '@/lib/supabase-server'
 import { getServiceClient } from '@/lib/supabase'
 import { computeDaysLive } from '@/lib/utils'
-import { getBusinessDevelopmentWorkspaceId } from '@/lib/workspace'
+import { getBusinessDevelopmentWorkspaceId, getDefaultFollowUpStakeholderId } from '@/lib/workspace'
 
 const ACTION_SELECT = `
   *,
   company:companies!proposals_company_fk(name),
-  primary_stakeholder:stakeholders!proposals_primary_stakeholder_fk(full_name)
+  primary_stakeholder:stakeholders!proposals_primary_stakeholder_fk(full_name),
+  internal_followup:stakeholders!proposals_internal_followup_fk(full_name)
 `
 
 function formatAction(row: Record<string, unknown>) {
   const company = row.company as { name?: string } | null
   const stakeholder = row.primary_stakeholder as { full_name?: string } | null
+  const internalFollowup = row.internal_followup as { full_name?: string } | null
 
   return {
     ...row,
     company: undefined,
     primary_stakeholder: undefined,
+    internal_followup: undefined,
     company_name: company?.name ?? null,
     stakeholder_name: stakeholder?.full_name ?? null,
+    internal_followup_name: internalFollowup?.full_name ?? null,
     days_live: computeDaysLive(row.updated_at as string | null),
   }
 }
@@ -111,7 +115,7 @@ export async function POST(req: NextRequest) {
       'expected_by', 'expected_by_is_approximate', 'status',
       'strategic_weight', 'dependencies', 'parallel_route', 'theme',
       'summary', 'notes', 'pdf_filename', 'parent_id', 'company_id',
-      'primary_stakeholder_id',
+      'primary_stakeholder_id', 'internal_followup_stakeholder_id',
     ]
     const actionData: Record<string, unknown> = {}
     for (const key of allowed) {
@@ -120,6 +124,14 @@ export async function POST(req: NextRequest) {
 
     const owner = body.owner === 'us' ? 'us' : 'them'
     const primaryStakeholderId = body.primary_stakeholder_id || null
+
+    // Every action needs a Netcompany-side follow-up owner, regardless of
+    // who the action itself belongs to — default to Harry Kaur unless the
+    // caller explicitly chose someone else.
+    if (!actionData.internal_followup_stakeholder_id) {
+      actionData.internal_followup_stakeholder_id =
+        await getDefaultFollowUpStakeholderId(supabase, workspaceId)
+    }
 
     const { data, error } = await supabase
       .from('proposals')

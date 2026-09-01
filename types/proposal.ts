@@ -11,6 +11,7 @@ export interface Action {
   primary_stakeholder_id: string | null
   assigned_user_id: string | null
   external_owner_stakeholder_id: string | null
+  internal_followup_stakeholder_id: string | null
   created_by: string | null
   archived_at: string | null
   company_link_status: LinkReviewStatus
@@ -38,6 +39,7 @@ export interface Action {
   parent_id?: string | null
   company_name?: string | null
   stakeholder_name?: string | null
+  internal_followup_name?: string | null
 }
 
 export interface ExtractedAction {
@@ -52,6 +54,13 @@ export interface ExtractedAction {
   dependencies: string | null
   summary: string | null
   status: ActionStatus
+  theme: string | null
+  company_id: string | null
+  primary_stakeholder_id: string | null
+  // Server-validated hint: the extraction model's own guess at which open
+  // action this continues. Always a real id from the candidates the model
+  // was shown, or null — never trust an id that wasn't validated server-side.
+  possible_continuation_of: string | null
 }
 
 export interface CompanyOption {

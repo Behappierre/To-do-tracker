@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, ReactNode } from 'react'
-import { X, ExternalLink, Trash2, Calendar, Building2, User, Bell } from 'lucide-react'
+import { X, ExternalLink, Trash2, Calendar, Bell, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   Action,
   ActionStatus,
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
 import { formatDate, daysLiveBg, cn } from '@/lib/utils'
+import { getInternalTeamOptions } from '@/lib/internal-team'
 
 interface DrawerProps {
   proposal: Action | null
@@ -41,9 +42,11 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
   const [parentId, setParentId]                 = useState<string>('')
   const [companyId, setCompanyId]               = useState('')
   const [stakeholderId, setStakeholderId]       = useState('')
+  const [followUpId, setFollowUpId]             = useState('')
   const [entities, setEntities]                 = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [saving, setSaving]                     = useState(false)
   const [confirmDelete, setConfirmDelete]       = useState(false)
+  const [showMoreDetails, setShowMoreDetails]   = useState(false)
 
   useEffect(() => {
     if (proposal) {
@@ -58,7 +61,9 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       setParentId(proposal.parent_id ?? '')
       setCompanyId(proposal.company_id ?? '')
       setStakeholderId(proposal.primary_stakeholder_id ?? '')
+      setFollowUpId(proposal.internal_followup_stakeholder_id ?? '')
       setConfirmDelete(false)
+      setShowMoreDetails(false)
     }
   }, [proposal])
 
@@ -80,6 +85,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
 
   const parentOptions = proposals.filter(p => p.id !== proposal.id && !p.parent_id)
   const hasChildren   = proposals.some(p => p.parent_id === proposal.id)
+  const internalTeam  = getInternalTeamOptions(entities)
 
   const patch = async (body: Record<string, unknown>) => {
     setSaving(true)
@@ -112,6 +118,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
       parent_id: parentId || null,
       company_id: companyId || null,
       primary_stakeholder_id: stakeholderId || null,
+      internal_followup_stakeholder_id: followUpId || null,
       account_name: company?.name ?? proposal.account_name,
       contact_name: stakeholder?.full_name ?? proposal.contact_name,
     })
@@ -192,20 +199,6 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
             )}
           </div>
 
-          {/* Meta */}
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <InfoRow icon={<User className="w-4 h-4" />} label="Contact" value={proposal.stakeholder_name ?? proposal.contact_name} />
-            <InfoRow icon={<Building2 className="w-4 h-4" />} label="Account" value={proposal.company_name ?? proposal.account_name} />
-            <InfoRow icon={<Calendar className="w-4 h-4" />} label="Meeting Date" value={formatDate(proposal.source_date)} />
-            <InfoRow
-              icon={<Calendar className="w-4 h-4" />}
-              label="Expected By"
-              value={proposal.expected_by
-                ? `${formatDate(proposal.expected_by)}${proposal.expected_by_is_approximate ? ' (approx)' : ''}`
-                : null}
-            />
-          </div>
-
           {/* Summary */}
           {proposal.summary && (
             <div className="space-y-1">
@@ -214,15 +207,7 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
             </div>
           )}
 
-          {/* Dependencies */}
-          {proposal.dependencies && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Dependencies</p>
-              <p className="text-sm text-gray-700 leading-relaxed">{proposal.dependencies}</p>
-            </div>
-          )}
-
-          {/* Editable fields */}
+          {/* At a glance — the fields that drive triage */}
           <div className="space-y-4 pt-2 border-t">
             <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 space-y-3">
               <div>
@@ -293,65 +278,29 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Expected By</label>
-                <Input
-                  type="date"
-                  value={expectedBy}
-                  onChange={(e) => setExpectedBy(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date is Approximate</label>
-                <div className="flex items-center h-9 gap-2">
-                  <input
-                    type="checkbox"
-                    id="approx"
-                    checked={expectedByApprox}
-                    onChange={(e) => setExpectedByApprox(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-                  />
-                  <label htmlFor="approx" className="text-sm text-gray-600">Approximate</label>
-                </div>
-              </div>
-            </div>
-
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Strategic Weight</label>
-              <Select value={strategicWeight} onChange={(e) => setStrategicWeight(e.target.value as StrategicWeight | '')}>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Responsible (Netcompany)
+              </label>
+              <Select value={followUpId} onChange={(e) => setFollowUpId(e.target.value)}>
                 <option value="">— Not set —</option>
-                {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+                {internalTeam.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.full_name}{person.title ? ` — ${person.title}` : ''}
+                  </option>
+                ))}
               </Select>
+              <p className="text-xs text-gray-400">
+                Netcompany-side person chasing this, even for client-owned actions.
+              </p>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Dependencies</label>
-              <Textarea
-                rows={2}
-                placeholder="What is this blocked on?"
-                value={dependencies}
-                onChange={(e) => setDependencies(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Parallel Route</label>
-              <Textarea
-                rows={2}
-                placeholder="Alternative path if this stalls…"
-                value={parallelRoute}
-                onChange={(e) => setParallelRoute(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notes</label>
-              <Textarea
-                rows={3}
-                placeholder="Add your notes here…"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Expected By</label>
+              <Input
+                type="date"
+                value={expectedBy}
+                onChange={(e) => setExpectedBy(e.target.value)}
               />
             </div>
 
@@ -374,17 +323,83 @@ export function ProposalDrawer({ proposal, proposals, onClose, onUpdated, onDele
             </div>
           </div>
 
-          {proposal.pdf_url && (
-            <a
-              href={proposal.pdf_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"
+          {/* More details — collapsed by default */}
+          <div className="pt-2 border-t">
+            <button
+              onClick={() => setShowMoreDetails((v) => !v)}
+              className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-800 transition-colors py-2"
             >
-              <ExternalLink className="w-4 h-4" />
-              Open source document
-            </a>
-          )}
+              {showMoreDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              More details
+            </button>
+
+            {showMoreDetails && (
+              <div className="space-y-4 pt-1">
+                <InfoRow icon={<Calendar className="w-4 h-4" />} label="Meeting Date" value={formatDate(proposal.source_date)} />
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Strategic Weight</label>
+                  <Select value={strategicWeight} onChange={(e) => setStrategicWeight(e.target.value as StrategicWeight | '')}>
+                    <option value="">— Not set —</option>
+                    {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="approx"
+                    checked={expectedByApprox}
+                    onChange={(e) => setExpectedByApprox(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                  />
+                  <label htmlFor="approx" className="text-sm text-gray-600">Expected By date is approximate</label>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Dependencies</label>
+                  <Textarea
+                    rows={2}
+                    placeholder="What is this blocked on?"
+                    value={dependencies}
+                    onChange={(e) => setDependencies(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Parallel Route</label>
+                  <Textarea
+                    rows={2}
+                    placeholder="Alternative path if this stalls…"
+                    value={parallelRoute}
+                    onChange={(e) => setParallelRoute(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notes</label>
+                  <Textarea
+                    rows={3}
+                    placeholder="Add your notes here…"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </div>
+
+                {proposal.pdf_url && (
+                  <a
+                    href={proposal.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open source document
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
