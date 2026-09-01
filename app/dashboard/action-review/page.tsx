@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Building2, Check, GitCompareArrows, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
+import { Building2, Check, Copy, GitCompareArrows, Link2, Loader2, Search, UserRound, X } from 'lucide-react'
 import Link from 'next/link'
 import { Action, EntityOptions } from '@/types/proposal'
 import { Button } from '@/components/ui/button'
@@ -176,13 +176,22 @@ export default function ActionLinkReviewPage() {
             Suggestions never save automatically.
           </p>
         </div>
-        <Link
-          href="/dashboard/action-review/compare"
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
-        >
-          <GitCompareArrows className="h-4 w-4" />
-          Compare decisions
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dashboard/action-review/duplicates"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+          >
+            <Copy className="h-4 w-4" />
+            Duplicate review
+          </Link>
+          <Link
+            href="/dashboard/action-review/compare"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+          >
+            <GitCompareArrows className="h-4 w-4" />
+            Compare decisions
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
