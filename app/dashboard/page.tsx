@@ -235,12 +235,13 @@ export default function DashboardPage() {
     const res = await fetch(`/api/proposals/${dragId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent_id: targetId }),
+      body: JSON.stringify({ parent_id: targetId, status: 'Superseded' }),
     })
     if (res.ok) {
       const updated = await res.json()
       setActions(prev => prev.map(a => a.id === dragId ? updated : a))
       setExpanded(prev => { const next = new Set(prev); next.add(targetId); return next })
+      setExpandedGrouped(prev => { const next = new Set(prev); next.add(targetId); return next })
     }
   }
 
@@ -321,12 +322,23 @@ export default function DashboardPage() {
     const children     = groupChildMap[a.id] ?? []
     const hasChildren   = children.length > 0
     const isExpandedRow = expandedGrouped.has(a.id)
+    const isDragOver     = dragOverId === a.id
+    const isDragging     = dragId === a.id
+    const canReceiveDrop = !isChild && dragId && dragId !== a.id && !groupChildMap[dragId]?.length
     return (
       <>
         <tr
+          draggable
+          onDragStart={() => setDragId(a.id)}
+          onDragEnd={() => { setDragId(null); setDragOverId(null) }}
+          onDragOver={e => { if (canReceiveDrop) { e.preventDefault(); setDragOverId(a.id) } }}
+          onDragLeave={() => { if (dragOverId === a.id) setDragOverId(null) }}
+          onDrop={e => { e.preventDefault(); handleDrop(a.id) }}
           className={cn(
             'hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-b-0',
-            isChild && 'bg-gray-50/50'
+            isChild && 'bg-gray-50/50',
+            isDragOver && 'ring-2 ring-indigo-400 ring-inset bg-indigo-50',
+            isDragging && 'opacity-50'
           )}
           onClick={() => setSelected(a)}
         >
@@ -498,7 +510,7 @@ export default function DashboardPage() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {dragId && (
             <div className="px-4 py-2 text-xs text-indigo-600 bg-indigo-50 border-b border-indigo-100">
-              Drop onto an action to make it a parent
+              Drop onto another action to mark this one as superseded by it
             </div>
           )}
           <div className="overflow-x-auto">
@@ -534,6 +546,11 @@ export default function DashboardPage() {
 
         /* ── GROUPED VIEW ─────────────────────────────────────────────────── */
         <div className="space-y-3">
+          {dragId && (
+            <div className="px-4 py-2 text-xs text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg">
+              Drop onto another action to mark this one as superseded by it
+            </div>
+          )}
           {groups.map(acctGroup => {
             const acctCollapsed = collapsedAccounts.has(acctGroup.account)
             const acctHasStalled = acctGroup.themes.some(t => t.hasStalled)
