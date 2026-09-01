@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { UploadModal } from '@/components/proposals/UploadModal'
 import { ProposalDrawer } from '@/components/proposals/ProposalDrawer'
 import { formatDate, daysLiveColor, cn } from '@/lib/utils'
@@ -449,43 +450,29 @@ export default function DashboardPage() {
             {WEIGHTS.map(w => <option key={w} value={w}>{w}</option>)}
           </Select>
         </div>
-        {/* View toggle */}
-        <div className="flex items-center gap-1 self-start bg-gray-100 rounded-lg p-1">
-          <button
-            onClick={() => setViewMode('grouped')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'grouped' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
-          >
-            <LayoutList className="w-4 h-4" /> Grouped
-          </button>
-          <button
-            onClick={() => setViewMode('flat')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'flat' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
-          >
-            <List className="w-4 h-4" /> Flat
-          </button>
+        {/* View toggle + display switches */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('grouped')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'grouped' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              <LayoutList className="w-4 h-4" /> Grouped
+            </button>
+            <button
+              onClick={() => setViewMode('flat')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'flat' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              <List className="w-4 h-4" /> Flat
+            </button>
+          </div>
+          <Switch checked={liveOnly} onChange={setLiveOnly} label="Live only" title="Open / Nudged / In Progress" />
+          {viewMode === 'grouped' && (
+            <Switch checked={showSuperseded} onChange={setShowSuperseded} label="Show superseded" />
+          )}
         </div>
-        <label className="flex items-center gap-2 self-start text-sm text-gray-500 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={liveOnly}
-            onChange={e => setLiveOnly(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-          />
-          Live only (Open / Nudged / In Progress)
-        </label>
-        {viewMode === 'grouped' && (
-          <label className="flex items-center gap-2 self-start text-sm text-gray-500 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={showSuperseded}
-              onChange={e => setShowSuperseded(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-            />
-            Show superseded
-          </label>
-        )}
       </div>
 
       {/* Error */}
