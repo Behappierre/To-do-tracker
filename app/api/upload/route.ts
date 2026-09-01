@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { getAuthClient } from '@/lib/supabase-server'
+import { getBusinessDevelopmentWorkspaceId } from '@/lib/workspace'
 
-const SYSTEM_PROMPT = `You are a BD action tracker assistant. The input below is a meeting summary document from a rail/transport tech consultancy. Your task is to extract every discrete action item from the "Actions and Next Steps" section and return them as a JSON array.
+const BASE_SYSTEM_PROMPT = `You are a BD action tracker assistant. The input below is a meeting summary document from a rail/transport tech consultancy. Your task is to extract every discrete action item from the "Actions and Next Steps" section and return them as a JSON array.
 
 For each action item, extract:
 - title: concise 5-10 word description of the action (e.g. "Ross to email Graham White re TPF funding")
@@ -15,6 +17,10 @@ For each action item, extract:
 - dependencies: text from the "Dependencies" field, or null
 - summary: 1-2 sentence context drawn from the Substantive Summary section that is directly relevant to this action item
 - status: always "Open"
+- theme: a short topic label for this action. Reuse one of the existing themes listed below when the topic clearly matches; only invent a new short theme name when none fit. null if you can't tell.
+- company_id: the canonical id of the company this action belongs to, copied EXACTLY from the "Known companies" list below — but ONLY when you are confident the account_name matches one of them. Otherwise null. Never invent an id that isn't in the list.
+- primary_stakeholder_id: the canonical id of the contact_name, copied EXACTLY from the "Known stakeholders" list below — but ONLY when confident. Otherwise null. Never invent an id that isn't in the list.
+- possible_continuation_of: if this action clearly continues or updates one of the "Currently open actions" listed below (same underlying ask, later stage of the same thread), copy its id EXACTLY. Otherwise null. Setting this does NOT mean you should skip extracting the action — always extract every action as its own row regardless.
 
 Return ONLY a valid JSON object in this exact shape, with no preamble, explanation, or markdown fences:
 {
@@ -30,7 +36,11 @@ Return ONLY a valid JSON object in this exact shape, with no preamble, explanati
       "strategic_weight": "Low" | "Medium" | "Medium-High" | "High" | null,
       "dependencies": "..." or null,
       "summary": "...",
-      "status": "Open"
+      "status": "Open",
+      "theme": "..." or null,
+      "company_id": "..." or null,
+      "primary_stakeholder_id": "..." or null,
+      "possible_continuation_of": "..." or null
     }
   ]
 }
@@ -39,6 +49,126 @@ Rules:
 - Extract EVERY action item — do not skip any.
 - If a field cannot be confidently extracted, set it to null.
 - Return nothing outside the JSON object.`
+
+interface WorkspaceContext {
+  companies: { id: string; name: string }[]
+  stakeholders: { id: string; full_name: string; company_id: string | null }[]
+  themes: string[]
+  openActions: { id: string; title: string | null; account_name: string | null }[]
+}
+
+async function loadWorkspaceContext(inputText: string): Promise<WorkspaceContext | null> {
+  try {
+    const supabase = getAuthClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) return null
+
+    const workspaceId = await getBusinessDevelopmentWorkspaceId(supabase)
+    const lowerText = inputText.toLowerCase()
+
+    const [companiesResult, stakeholdersResult, actionsResult] = await Promise.all([
+      supabase.from('companies').select('id, name').eq('workspace_id', workspaceId).eq('status', 'active'),
+      supabase.from('stakeholders').select('id, full_name, company_id').eq('workspace_id', workspaceId).eq('status', 'active'),
+      supabase.from('proposals').select('id, title, account_name, theme')
+        .eq('workspace_id', workspaceId)
+        .is('archived_at', null)
+        .neq('status', 'Done')
+        .neq('status', 'Superseded'),
+    ])
+
+    // Only surface companies/stakeholders actually mentioned in this document —
+    // keeps the bundle small and relevant instead of dumping the whole workspace in.
+    const matchedCompanies = (companiesResult.data ?? []).filter(
+      (c) => c.name && lowerText.includes(c.name.toLowerCase())
+    )
+    const matchedStakeholders = (stakeholdersResult.data ?? []).filter(
+      (s) => s.full_name && lowerText.includes(s.full_name.toLowerCase())
+    )
+    const matchedCompanyNames = new Set(matchedCompanies.map((c) => c.name.toLowerCase()))
+
+    const openActions = (actionsResult.data ?? [])
+      .filter((a) => a.account_name && matchedCompanyNames.has(a.account_name.toLowerCase()))
+      .map((a) => ({ id: a.id as string, title: a.title as string | null, account_name: a.account_name as string | null }))
+
+    const themes = Array.from(
+      new Set((actionsResult.data ?? []).map((a) => a.theme).filter((t): t is string => Boolean(t)))
+    ).sort()
+
+    return { companies: matchedCompanies, stakeholders: matchedStakeholders, themes, openActions }
+  } catch (err) {
+    console.error('loadWorkspaceContext error (extraction proceeds without it):', err)
+    return null
+  }
+}
+
+function buildContextBlock(context: WorkspaceContext | null): string {
+  if (!context) {
+    return '\n\nNo workspace context is available for this request — leave company_id, primary_stakeholder_id, and possible_continuation_of null for every action.'
+  }
+
+  const { companies, stakeholders, themes, openActions } = context
+  const parts: string[] = []
+
+  parts.push(
+    companies.length
+      ? `Known companies (use for company_id):\n${companies.map((c) => `- id: ${c.id}, name: "${c.name}"`).join('\n')}`
+      : 'Known companies: none matched this document — leave company_id null for every action.'
+  )
+
+  parts.push(
+    stakeholders.length
+      ? `Known stakeholders (use for primary_stakeholder_id):\n${stakeholders.map((s) => `- id: ${s.id}, name: "${s.full_name}", company_id: ${s.company_id ?? 'null'}`).join('\n')}`
+      : 'Known stakeholders: none matched this document — leave primary_stakeholder_id null for every action.'
+  )
+
+  parts.push(
+    themes.length
+      ? `Existing themes already used in this workspace (reuse when the topic matches):\n${themes.map((t) => `- "${t}"`).join('\n')}`
+      : 'No existing themes recorded yet — pick a short descriptive one if the topic warrants it.'
+  )
+
+  parts.push(
+    openActions.length
+      ? `Currently open actions for these companies (use for possible_continuation_of):\n${openActions.map((a) => `- id: ${a.id}, title: "${a.title ?? 'Untitled'}" (${a.account_name})`).join('\n')}`
+      : 'No currently open actions on these companies — leave possible_continuation_of null for every action.'
+  )
+
+  return `\n\n${parts.join('\n\n')}`
+}
+
+interface RawExtractedAction {
+  title?: string | null
+  account_name?: string | null
+  contact_name?: string | null
+  owner?: string | null
+  source_date?: string | null
+  expected_by?: string | null
+  expected_by_is_approximate?: boolean | null
+  strategic_weight?: string | null
+  dependencies?: string | null
+  summary?: string | null
+  status?: string | null
+  theme?: string | null
+  company_id?: string | null
+  primary_stakeholder_id?: string | null
+  possible_continuation_of?: string | null
+}
+
+// The model's ids must be validated against the exact bundle we sent it —
+// a hallucinated id that happens to look like a UUID is a real failure mode,
+// never trust one that wasn't actually offered as an option.
+function sanitizeExtractedActions(actions: RawExtractedAction[], context: WorkspaceContext | null): RawExtractedAction[] {
+  const companyIds = new Set(context?.companies.map((c) => c.id) ?? [])
+  const stakeholderIds = new Set(context?.stakeholders.map((s) => s.id) ?? [])
+  const openActionIds = new Set(context?.openActions.map((a) => a.id) ?? [])
+
+  return actions.map((a) => ({
+    ...a,
+    company_id: a.company_id && companyIds.has(a.company_id) ? a.company_id : null,
+    primary_stakeholder_id: a.primary_stakeholder_id && stakeholderIds.has(a.primary_stakeholder_id) ? a.primary_stakeholder_id : null,
+    possible_continuation_of: a.possible_continuation_of && openActionIds.has(a.possible_continuation_of) ? a.possible_continuation_of : null,
+  }))
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -101,11 +231,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No PDF file or text provided' }, { status: 400 })
     }
 
+    const context = await loadWorkspaceContext(inputText)
+    const systemPrompt = BASE_SYSTEM_PROMPT + buildContextBlock(context)
+
     const client = new Anthropic()
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 16000,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [
         {
           role: 'user',
@@ -119,7 +252,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unexpected response from Claude' }, { status: 500 })
     }
 
-    let parsed: { actions: unknown[] }
+    let parsed: { actions: RawExtractedAction[] }
     try {
       const cleaned = content.text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
       parsed = JSON.parse(cleaned)
@@ -131,7 +264,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Claude could not find any action items in this document' }, { status: 400 })
     }
 
-    return NextResponse.json({ proposals: parsed.actions, filename })
+    const sanitized = sanitizeExtractedActions(parsed.actions, context)
+
+    return NextResponse.json({ proposals: sanitized, filename })
   } catch (err) {
     console.error('Upload error:', err)
     const msg = err instanceof Error ? err.message : String(err)

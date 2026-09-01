@@ -36,14 +36,16 @@ const MATCH_THRESHOLD                = 0.3
 
 type DraftAction = ExtractedAction & {
   notes: string
-  company_id: string | null
-  primary_stakeholder_id: string | null
   internal_followup_stakeholder_id: string | null
 }
 
 interface DuplicateMatch {
   action: Action
   score: number
+  // 'text' = found by the deterministic fuzzy matcher (Part B); 'ai' = the
+  // extraction model's own possible_continuation_of hint, used only when
+  // the text matcher found nothing on its own.
+  source: 'text' | 'ai'
 }
 
 function emptyDraft(): DraftAction {
@@ -52,8 +54,8 @@ function emptyDraft(): DraftAction {
     owner: 'them', source_date: null, expected_by: null,
     expected_by_is_approximate: false, strategic_weight: null,
     dependencies: null, summary: null, status: 'Open', notes: '',
-    company_id: null, primary_stakeholder_id: null,
-    internal_followup_stakeholder_id: null,
+    theme: null, company_id: null, primary_stakeholder_id: null,
+    possible_continuation_of: null, internal_followup_stakeholder_id: null,
   }
 }
 
@@ -73,10 +75,31 @@ function findBestMatch(draft: DraftAction, candidates: Action[]): DuplicateMatch
     if (normalize(candidate.account_name) !== draftAccount) continue
     const score = scoreCandidate(draft, candidate)
     if (score >= MATCH_THRESHOLD && (!best || score > best.score)) {
-      best = { action: candidate, score }
+      best = { action: candidate, score, source: 'text' }
     }
   }
   return best
+}
+
+// Reconciles the deterministic text match with the extraction model's own
+// possible_continuation_of hint. The text matcher is the proven, auditable
+// signal — it always wins when it finds something. The model's hint only
+// fills in when the text matcher found nothing; when the two disagree, we
+// say so rather than silently picking one.
+function reconcileMatch(
+  textMatch: DuplicateMatch | null,
+  draft: DraftAction,
+  candidates: Action[]
+): { match: DuplicateMatch | null; aiDisagreement: string | null } {
+  const aiCandidate = draft.possible_continuation_of
+    ? candidates.find((c) => c.id === draft.possible_continuation_of)
+    : undefined
+
+  if (!aiCandidate) return { match: textMatch, aiDisagreement: null }
+  if (!textMatch) return { match: { action: aiCandidate, score: 1, source: 'ai' }, aiDisagreement: null }
+  if (textMatch.action.id === aiCandidate.id) return { match: textMatch, aiDisagreement: null }
+
+  return { match: textMatch, aiDisagreement: aiCandidate.title }
 }
 
 export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
@@ -95,6 +118,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const [entities, setEntities]     = useState<EntityOptions>({ companies: [], stakeholders: [] })
   const [matches, setMatches]       = useState<(DuplicateMatch | null)[]>([])
   const [resolutions, setResolutions] = useState<DupResolution[]>([])
+  const [aiDisagreements, setAiDisagreements] = useState<(string | null)[]>([])
 
   useEffect(() => {
     if (!open || entities.companies.length > 0) return
@@ -122,7 +146,7 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
   const reset = () => {
     setStage('drop'); setFilename(''); setPdfBase64(''); setPasteText('')
     setDrafts([]); setSelected([]); setExpanded([]); setShowMore([])
-    setMatches([]); setResolutions([])
+    setMatches([]); setResolutions([]); setAiDisagreements([])
   }
 
   const handleClose = () => { reset(); onClose() }
@@ -159,9 +183,12 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
       } catch {
         // ignore — matching is skipped, not fatal
       }
-      const foundMatches = d.map((draft) => findBestMatch(draft, candidates))
+      const reconciled = d.map((draft) => reconcileMatch(findBestMatch(draft, candidates), draft, candidates))
+      const foundMatches = reconciled.map((r) => r.match)
+      const disagreements = reconciled.map((r) => r.aiDisagreement)
 
       setDrafts(d)
+      setAiDisagreements(disagreements)
       setMatches(foundMatches)
       setResolutions(foundMatches.map(() => 'new'))
       setSelected(d.map(() => true))
@@ -441,9 +468,15 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                         <span>
                           Possible match: <strong>{matches[i]!.action.title ?? 'Untitled'}</strong>
-                          {' '}({Math.round(matches[i]!.score * 100)}%) — opened {formatDate(matches[i]!.action.source_date ?? matches[i]!.action.created_at)}
+                          {' '}({matches[i]!.source === 'ai' ? 'AI-suggested' : `${Math.round(matches[i]!.score * 100)}%`})
+                          {' '}— opened {formatDate(matches[i]!.action.source_date ?? matches[i]!.action.created_at)}
                         </span>
                       </div>
+                      {aiDisagreements[i] && (
+                        <p className="mt-1.5 text-amber-700">
+                          AI also flagged a different possible continuation: &quot;{aiDisagreements[i]}&quot; — check both before deciding.
+                        </p>
+                      )}
                       <div className="flex gap-1.5 mt-2">
                         <button
                           onClick={() => setResolution(i, 'new')}
@@ -560,6 +593,9 @@ export function UploadModal({ open, onClose, onSaved }: UploadModalProps) {
                                 <option value="">— Not set —</option>
                                 {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
                               </Select>
+                            </Field>
+                            <Field label="Theme">
+                              <Input value={draft.theme ?? ''} onChange={(e) => updateDraft(i, 'theme', e.target.value || null)} />
                             </Field>
                           </div>
                           <div className="flex items-center gap-2">
